@@ -63,6 +63,14 @@ function allFavs(){
 
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
+
+function padCat(c){
+  if(c==null||c==='') return null;
+  const s=String(c).trim();
+  if(!/^\d+$/.test(s)) return s;
+  return s.padStart(4,'0');
+}
+
 /* Fetch real name from SIRA (via CORS proxies, with fallback) */
 async function fetchNomeOnline(id_ost){
   if(!id_ost || !navigator.onLine) return null;
@@ -121,7 +129,8 @@ async function resolveNome(f){
   if(cached && cached.nome){
     f.properties.nome_reale=cached.nome;
     f.properties.codice=cached.codice;
-    f.properties.nome=cached.codice?`${cached.codice} - ${cached.nome}`:cached.nome;
+    f.properties.codice=padCat(cached.codice);
+    f.properties.nome=f.properties.codice?`${f.properties.codice} - ${cached.nome}`:cached.nome;
     return f.properties.nome;
   }
 
@@ -162,7 +171,7 @@ async function renderFavs(){
     <div class="inf">
       <div class="n">${esc(it.nome||it.nome_reale||'Grotta')}</div>
       <div class="m">${esc([it.comune,it.provincia].filter(Boolean).join(' · '))}</div>
-      <div class="id">${it.codice?('N. '+esc(it.codice)):('ID '+esc(it.id_ost))}</div>
+      <div class="id">${it.codice?('N. '+esc(padCat(it.codice))):('ID '+esc(it.id_ost))}</div>
     </div>
     <div class="bt">
       <button data-a="map">🗺️</button>
@@ -267,13 +276,14 @@ function openCard(f){
   const p=f.properties;
   const [lo,la]=f.geometry.coordinates;
   document.getElementById('cardTitle').textContent=p.nome||'Grotta';
-  document.getElementById('cardId').textContent=p.codice?('N. catastale  '+p.codice):(p.id_ost?('ID SIRA  '+p.id_ost):'');
+  const cat=padCat(p.codice);
+  document.getElementById('cardId').textContent=cat?('N. catastale  '+cat):(p.id_ost?('ID SIRA  '+p.id_ost):'');
   document.getElementById('cardMeta').innerHTML=
     (p.comune?`<span class="pill"><strong>${esc(p.comune)}</strong></span>`:'')+
     (p.provincia?`<span class="pill">${esc(p.provincia)}</span>`:'')+
     (p.ambito?`<span class="pill">${esc(p.ambito)}</span>`:'')+
     `<span class="pill">${la.toFixed(5)}, ${lo.toFixed(5)}</span>`;
-  const codice = p.codice || null;
+  const codice = padCat(p.codice);
   const csrScheda = codice ? `https://m.catastospeleologicoregionale.sardegna.it/scheda-catastale/${codice}` : null;
   const csrPos = codice ? `https://www.catastospeleologicoregionale.sardegna.it/scheda-posizionamento/${codice}` : null;
   const csrRilievo = codice ? `https://www.catastospeleologicoregionale.sardegna.it/rilievo-pdf/${codice}` : null;
@@ -315,7 +325,8 @@ function filter(){
     if(pv&&p.provincia!==pv) return false;
     if(am&&p.ambito!==am) return false;
     if(q){
-      const h=`${p.nome||''} ${p.nome_reale||''} ${p.comune||''} ${p.provincia||''} ${p.id_ost||''} ${p.codice||''}`.toLowerCase();
+      const cat=padCat(p.codice)||'';
+      const h=`${p.nome||''} ${p.nome_reale||''} ${p.comune||''} ${p.provincia||''} ${p.id_ost||''} ${p.codice||''} ${cat}`.toLowerCase();
       if(!h.includes(q)) return false;
     }
     return true;
@@ -496,8 +507,6 @@ function startRecording() {
   recStart = Date.now();
   if (recPolyline) { map.removeLayer(recPolyline); recPolyline = null; }
   document.getElementById('trackBar').classList.add('show');
-  document.getElementById('fabTrack').classList.add('on');
-  document.getElementById('fabTrack').textContent = '■';
   updateTrackStat();
   // center on user once
   if (myMarker) map.setView(myMarker.getLatLng(), Math.max(map.getZoom(), 15));
@@ -506,8 +515,6 @@ function startRecording() {
 
 function stopRecording() {
   recording = false;
-  document.getElementById('fabTrack').classList.remove('on');
-  document.getElementById('fabTrack').textContent = '●';
   // keep bar until save or discard
   document.getElementById('trackSub').textContent = recPoints.length + ' punti · fermata';
 }
@@ -548,8 +555,6 @@ function discardRecording() {
   recPoints = [];
   if (recPolyline) { map.removeLayer(recPolyline); recPolyline = null; }
   document.getElementById('trackBar').classList.remove('show');
-  document.getElementById('fabTrack').classList.remove('on');
-  document.getElementById('fabTrack').textContent = '●';
 }
 
 /* Route mode: tap points on map */
@@ -566,28 +571,89 @@ function clearRouteDraft() {
   if (routePolyline) { map.removeLayer(routePolyline); routePolyline = null; }
   routeMarkers.forEach(m => map.removeLayer(m));
   routeMarkers = [];
+  routeGeom = [];
 }
 
-function onMapClickRoute(e) {
-  if (!routeMode) return;
-  routePoints.push({ lat: e.latlng.lat, lng: e.latlng.lng });
-  const m = L.circleMarker(e.latlng, {
-    radius: 7, color: '#fff', weight: 2, fillColor: activeColor, fillOpacity: 1
-  }).addTo(map);
-  routeMarkers.push(m);
-  const latlngs = routePoints.map(p => [p.lat, p.lng]);
+const SNAP_MAX_M = 70;
+let routeGeom = [];
+let routeBusy = false;
+
+async function nearestPath(lat, lng) {
+  try {
+    const url = `https://router.project-osrm.org/nearest/v1/foot/${lng},${lat}?number=1`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const wp = data.waypoints && data.waypoints[0];
+    if (!wp || !wp.location) return null;
+    return { lng: wp.location[0], lat: wp.location[1], dist: wp.distance || 9999 };
+  } catch (e) {
+    return null;
+  }
+}
+
+async function pathBetween(a, b) {
+  try {
+    const url = `https://router.project-osrm.org/route/v1/foot/${a.lng},${a.lat};${b.lng},${b.lat}?overview=full&geometries=geojson`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const coords = data.routes && data.routes[0] && data.routes[0].geometry && data.routes[0].geometry.coordinates;
+    if (!coords || coords.length < 2) return null;
+    return coords.map(c => ({ lng: c[0], lat: c[1] }));
+  } catch (e) {
+    return null;
+  }
+}
+
+function redrawRoute() {
+  const latlngs = routeGeom.map(p => [p.lat, p.lng]);
   if (!routePolyline) {
-    routePolyline = L.polyline(latlngs, { color: activeColor, weight: 4, dashArray: '8 6', opacity: 0.95 }).addTo(map);
+    routePolyline = L.polyline(latlngs, { color: activeColor, weight: 4, opacity: 0.95 }).addTo(map);
   } else {
     routePolyline.setLatLngs(latlngs);
+    routePolyline.setStyle({ color: activeColor, dashArray: null });
   }
-  // show save bar
+}
+
+async function onMapClickRoute(e) {
+  if (!routeMode || routeBusy) return;
+  routeBusy = true;
+  const raw = { lat: e.latlng.lat, lng: e.latlng.lng };
+  status('Controllo sentiero…');
+  const near = await nearestPath(raw.lat, raw.lng);
+  const onPath = near && near.dist <= SNAP_MAX_M;
+  const pt = onPath ? { lat: near.lat, lng: near.lng, snapped: true } : { lat: raw.lat, lng: raw.lng, snapped: false };
+  const prev = routePoints[routePoints.length - 1];
+  routePoints.push(pt);
+
+  const m = L.circleMarker([pt.lat, pt.lng], {
+    radius: 7, color: '#fff', weight: 2, fillColor: onPath ? activeColor : '#f5b942', fillOpacity: 1
+  }).addTo(map);
+  routeMarkers.push(m);
+
+  if (!prev) {
+    routeGeom = [{ lat: pt.lat, lng: pt.lng }];
+  } else if (prev.snapped && pt.snapped) {
+    status('Seguo il sentiero…');
+    const seg = await pathBetween(prev, pt);
+    if (seg && seg.length) {
+      routeGeom.push(...seg.slice(1));
+    } else {
+      routeGeom.push({ lat: pt.lat, lng: pt.lng });
+    }
+  } else {
+    routeGeom.push({ lat: pt.lat, lng: pt.lng });
+  }
+  redrawRoute();
   document.getElementById('trackBar').classList.add('show');
-  document.getElementById('trackStat').textContent = routePoints.length + ' waypoint · ' + fmtDist(trackDistance(routePoints));
-  document.getElementById('trackSub').textContent = 'Percorso a punti — Stop per annullare, Salva per confermare';
-  // temporarily repurpose buttons
+  document.getElementById('trackStat').textContent = routePoints.length + ' punti · ' + fmtDist(trackDistance(routeGeom));
+  document.getElementById('trackSub').textContent = onPath
+    ? 'Agganciato al sentiero'
+    : 'Fuori sentiero: uso il punto toccato';
   document.getElementById('btnStopTrack').onclick = cancelRouteMode;
   document.getElementById('btnSaveTrack').onclick = saveRoute;
+  routeBusy = false;
 }
 
 function cancelRouteMode() {
@@ -609,7 +675,7 @@ async function saveRoute() {
   const name = prompt('Nome percorso', 'Percorso ' + new Date().toLocaleString('it-IT', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }));
   if (name == null) return;
   status('Calcolo quote dal modello digitale…');
-  const pts = routePoints.map(p => ({ lat: p.lat, lng: p.lng }));
+  const pts = (routeGeom.length >= 2 ? routeGeom : routePoints).map(p => ({ lat: p.lat, lng: p.lng }));
   await fetchElevations(pts);
   const tr = {
     id: 'r' + Date.now(),
@@ -837,7 +903,8 @@ function renderTracksList() {
       <div class="top">
         <div class="color-dot" style="background:${tr.color||'#3dcfb0'};pointer-events:none"></div>
         <div class="cname">${esc(tr.name)}</div>
-        <button class="toggle ${on?'on':''}" data-a="tog" title="Mostra/nascondi"></button>
+        <span style="font-size:11px;color:var(--muted)">Mappa</span>
+        <button class="toggle ${on?'on':''}" data-a="tog" title="Mostra o nascondi sulla mappa"></button>
       </div>
       <div class="meta">${type} · ${tr.points.length} pt · ${(dist/1000).toFixed(2)} km${elevTxt}</div>
       <div class="acts">
@@ -999,15 +1066,14 @@ function initTrackingUI() {
     };
   }
 
-  document.getElementById('fabTrack').onclick = () => {
-    if (recording) {
-      stopRecording();
-    } else if (routeMode) {
-      // ignore
-    } else {
+  const btnStartRec = document.getElementById('btnStartRec');
+  if (btnStartRec) {
+    btnStartRec.onclick = () => {
+      if (routeMode) cancelRouteMode();
+      switchView('map');
       startRecording();
-    }
-  };
+    };
+  }
   document.getElementById('btnStopTrack').onclick = () => {
     if (routeMode) cancelRouteMode();
     else stopRecording();

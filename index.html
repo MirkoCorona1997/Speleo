@@ -25,19 +25,20 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
 
 .top{
   position:absolute;top:0;left:0;right:0;z-index:1000;
-  padding:max(10px,var(--safe-t)) 12px 20px;
+  padding:max(8px,var(--safe-t)) 8px 16px 8px;
   background:linear-gradient(to bottom,rgba(26,35,50,.97) 60%,transparent);
-  display:flex;gap:8px;align-items:center;
+  display:flex;gap:6px;align-items:center;
+  box-sizing:border-box;max-width:100%;
 }
 .search{
-  flex:1;height:44px;background:var(--panel);border:1px solid var(--line);
-  border-radius:22px;padding:0 16px 0 40px;color:var(--text);font-size:15px;outline:none;
+  flex:1 1 auto;min-width:0;width:0;height:40px;background:var(--panel);border:1px solid var(--line);
+  border-radius:20px;padding:0 10px 0 32px;color:var(--text);font-size:14px;outline:none;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' fill='%239aabbc' viewBox='0 0 16 16'%3E%3Cpath d='M11.7 10.3a6 6 0 1 0-1.4 1.4l3.5 3.5 1.4-1.4-3.5-3.5zM6.5 10.5a4 4 0 1 1 0-8 4 4 0 0 1 0 8z'/%3E%3C/svg%3E");
   background-repeat:no-repeat;background-position:14px center;
 }
 .search::placeholder{color:var(--muted)}
 .tbtn{
-  width:44px;height:44px;border-radius:22px;border:1px solid var(--line);
+  width:40px;height:40px;border-radius:20px;border:1px solid var(--line);flex:0 0 40px;
   background:var(--panel);color:var(--text);font-size:18px;
   display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;
 }
@@ -102,11 +103,11 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
   padding:6px 14px;border-radius:16px;font-size:12px;font-weight:600;z-index:900;pointer-events:none;
 }
 .ver{
-  position:absolute;top:max(10px,var(--safe-t));left:12px;z-index:1200;
+  position:absolute;top:calc(52px + var(--safe-t));left:10px;z-index:900;
   background:#3dcfb0;color:#0a1a14;font-size:10px;font-weight:800;padding:3px 8px;border-radius:8px;
 }
 .offline{
-  position:absolute;top:max(10px,var(--safe-t));right:12px;z-index:1200;
+  position:absolute;top:calc(52px + var(--safe-t));right:10px;z-index:900;
   background:#c45c1a;color:#fff;font-size:10px;font-weight:800;padding:4px 10px;border-radius:12px;display:none;
 }
 .offline.show{display:block}
@@ -280,7 +281,7 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
 </style>
 </head>
 <body>
-<div class="ver">v5.6</div>
+<div class="ver">v5.9</div>
 <div class="offline" id="offlineBadge">OFFLINE</div>
 <div class="errbox" id="errbox"></div>
 
@@ -314,9 +315,8 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
     <button class="go" id="applyFilters">Applica</button>
   </div>
   <div class="chip" id="status">Caricamento…</div>
-  <div class="hint-bar">Tieni premuto per navigare · FAB per traccia</div>
-  <div class="mode-chip" id="modeChip">Modalità percorso: tocca la mappa</div>
-  <button class="fab-track" id="fabTrack" title="Traccia GPS">●</button>
+  <div class="hint-bar">Tieni premuto per navigare</div>
+  <div class="mode-chip" id="modeChip">Percorso: vicino al sentiero lo segue, lontano usa il tuo punto</div>
   <div class="track-bar" id="trackBar">
     <div class="row">
       <div class="info"><strong id="trackStat">—</strong><span id="trackSub">Traccia GPS</span></div>
@@ -330,6 +330,7 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
   <h1>Tracce</h1>
   <p class="sub" id="trCount">0 tracce salvate</p>
   <div class="row" style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+    <button class="tbtn-sm rec" id="btnStartRec">● Registra GPS</button>
     <button class="tbtn-sm acc" id="btnNewRoute">+ Percorso a punti</button>
     <label class="tbtn-sm" style="cursor:pointer">
       Carica GPX
