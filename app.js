@@ -291,7 +291,7 @@ function openPoiSheet(){
     box.querySelectorAll('button').forEach(x => x.classList.remove('acc'));
     b.classList.add('acc');
   });
-  document.getElementById('poiSheet').classList.add('show');
+  document.getElementById('poiSheet').classList.add('show'); document.getElementById('poiSheet').style.display='block';
 }
 function poiNumber(p){
   const ordered = savedPois.slice().sort((a,b)=>(a.created||0)-(b.created||0));
@@ -312,7 +312,7 @@ async function savePoi(){
   savedPois.unshift({ id:'p'+Date.now(), name, type: poiType, desc, lat: poiDraft.lat, lng: poiDraft.lng, ele, created: Date.now() });
   persistPois();
   drawPois();
-  document.getElementById('poiSheet').classList.remove('show');
+  document.getElementById('poiSheet').classList.remove('show'); document.getElementById('poiSheet').style.display='none';
   hideNavPin();
   status('Punto salvato');
   renderPoiList();
@@ -1289,6 +1289,7 @@ function initTrackingUI() {
   renderTracksList();
 
   document.getElementById('tdClose') && (document.getElementById('tdClose').onclick = closeTrackDetail);
+  window.appCloseDetail = closeTrackDetail;
   
   const btnTopo = document.getElementById('btnTopo');
   if (btnTopo) {
@@ -1356,6 +1357,10 @@ function initTrackingUI() {
 
 
 async function init(){
+  const tb=document.getElementById('trackBar'); if(tb) tb.classList.remove('show');
+  const td=document.getElementById('trDetail'); if(td) td.classList.remove('open');
+  const ps=document.getElementById('poiSheet'); if(ps){ ps.classList.remove('show'); ps.style.display='none'; }
+
   initMap();
   await openDB();
   document.getElementById('offlineBadge').classList.toggle('show',!navigator.onLine);
@@ -1368,7 +1373,7 @@ async function init(){
   const navSave = document.getElementById('navPinSave');
   if (navSave) navSave.onclick = window.appSavePoi;
   document.getElementById('poiOk').onclick = savePoi;
-  document.getElementById('poiCancel').onclick = () => document.getElementById('poiSheet').classList.remove('show');
+  document.getElementById('poiCancel').onclick = () => document.getElementById('poiSheet').classList.remove('show'); document.getElementById('poiSheet').style.display='none';
   const poiSort = document.getElementById('poiSort');
   if (poiSort) poiSort.onchange = () => renderPoiList();
   renderPoiList();
