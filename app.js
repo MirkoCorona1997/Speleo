@@ -551,20 +551,17 @@ function updateGpsMarker(latlng, acc) {
   else accCircle = L.circle(latlng, { radius: Math.max(acc || 8, 3), color: '#3b9eff', weight: 1, fillColor: '#3b9eff', fillOpacity: 0.12, interactive: false }).addTo(map);
   if (acc) accCircle.setRadius(Math.max(acc, 3));
   if (!myMarker) {
-    const icon = L.divIcon({ className: 'gps-icon', html: '<div class="gps-dot"></div>', iconSize: [22,22], iconAnchor: [11,11] });
+    const icon = L.divIcon({ className: 'gps-icon', html: '<div class="gps-live"><div class="gps-cone" id="gpsArrow"></div><div class="gps-dot"></div></div>', iconSize: [72,72], iconAnchor: [36,36] });
     myMarker = L.marker(latlng, { icon, zIndexOffset: 2000, interactive: false }).addTo(map);
-    const aIcon = L.divIcon({ className: 'gps-icon', html: '<div class="gps-arrow" id="gpsArrow"></div>', iconSize: [18,26], iconAnchor: [9,22] });
-    myArrow = L.marker(latlng, { icon: aIcon, zIndexOffset: 1999, interactive: false }).addTo(map);
   } else {
     myMarker.setLatLng(latlng);
-    myArrow.setLatLng(latlng);
-  }
+      }
   applyHeading();
 }
 
 function applyHeading() {
   const el = document.getElementById('gpsArrow');
-  if (el) el.style.transform = 'rotate(' + heading + 'deg)';
+  if (el) el.style.transform = 'rotate(' + heading.toFixed(1) + 'deg)';
 }
 
 let gpsPoll = null;
@@ -614,7 +611,7 @@ function startGpsWatch() {
   const opt = { enableHighAccuracy: true, maximumAge: 0, timeout: 8000 };
   watchId = navigator.geolocation.watchPosition(onGps, err => { console.warn(err); }, opt);
   if (gpsPoll) clearInterval(gpsPoll);
-  gpsPoll = setInterval(() => navigator.geolocation.getCurrentPosition(onGps, () => {}, opt), 1000);
+  gpsPoll = setInterval(() => navigator.geolocation.getCurrentPosition(onGps, () => {}, opt), 500);
 }
 
 
@@ -982,40 +979,90 @@ function elevStats(pts) {
   };
 }
 
+function profileSamples(pts) {
+  const samples = [];
+  let dist = 0, lastEle = null;
+  for (let i = 0; i < pts.length; i++) {
+    if (i > 0) dist += haversine(pts[i-1], pts[i]);
+    if (pts[i].ele != null && !isNaN(pts[i].ele)) lastEle = pts[i].ele;
+    samples.push({ d: dist, ele: lastEle });
+  }
+  if (samples.length < 2 || samples.every(s => s.ele == null)) return [];
+  const total = samples[samples.length - 1].d;
+  const out = [];
+  let j = 0;
+  const maxM = Math.min(total, 30000);
+  for (let m = 0; m <= maxM; m += 1) {
+    while (j < samples.length - 2 && samples[j+1].d < m) j++;
+    const a = samples[j], b = samples[Math.min(j+1, samples.length-1)];
+    const span = Math.max(b.d - a.d, 0.001);
+    const t = Math.min(1, Math.max(0, (m - a.d) / span));
+    const ea = a.ele != null ? a.ele : b.ele;
+    const eb = b.ele != null ? b.ele : a.ele;
+    out.push({ d: m, ele: ea + (eb - ea) * t });
+  }
+  if (!out.length || out[out.length-1].d < total) out.push({ d: total, ele: samples[samples.length-1].ele });
+  return out;
+}
 function buildElevChart(pts) {
   const st = elevStats(pts);
-  if (!st.has) {
-    return '<div class="elev-chart"><div class="clabel">Nessun dato altimetrico (registra con GPS o importa GPX con &lt;ele&gt;)</div></div>';
+  const prof = profileSamples(pts);
+  if (!st.has || prof.length < 2) {
+    return '<div class="elev-chart"><div class="clabel">Nessun dato altimetrico</div></div>';
   }
-  const W = 320, H = 120, pad = 8;
-  const vals = st.eles;
-  // interpolate nulls for display
-  const series = [];
-  let last = st.min;
-  for (let i = 0; i < vals.length; i++) {
-    if (vals[i] != null) last = vals[i];
-    series.push(last);
-  }
-  const minE = Math.min(...series), maxE = Math.max(...series);
-  const range = Math.max(maxE - minE, 1);
-  const n = series.length;
+  window._elevProf = prof;
+  const H = 150, pad = 18;
+  const ppm = 2.4;
+  const W = Math.max(340, Math.round(prof[prof.length-1].d * ppm) + pad * 2);
+  const minE = st.min, maxE = st.max, range = Math.max(maxE - minE, 1);
   let d = '';
-  series.forEach((e, i) => {
-    const x = pad + (i / Math.max(n - 1, 1)) * (W - 2 * pad);
-    const y = pad + (1 - (e - minE) / range) * (H - 2 * pad);
-    d += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1) + ' ';
-  });
-  // area fill
-  const x0 = pad, x1 = pad + (W - 2 * pad);
-  const yBase = H - pad;
-  const area = d + `L${x1},${yBase} L${x0},${yBase} Z`;
+  const step = Math.max(1, Math.floor(prof.length / 800));
+  for (let i = 0; i < prof.length; i += step) {
+    const p = prof[i];
+    const x = pad + (p.d / prof[prof.length-1].d) * (W - 2 * pad);
+    const y = pad + (1 - (p.ele - minE) / range) * (H - 2 * pad);
+    d += (d ? 'L' : 'M') + x.toFixed(1) + ',' + y.toFixed(1) + ' ';
+  }
+  const last = prof[prof.length-1];
+  const lx = pad + (W - 2 * pad);
+  const ly = pad + (1 - (last.ele - minE) / range) * (H - 2 * pad);
+  d += 'L' + lx.toFixed(1) + ',' + ly.toFixed(1) + ' ';
+  const area = d + `L${W-pad},${H-pad} L${pad},${H-pad} Z`;
   return `<div class="elev-chart">
-    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-      <path d="${area}" fill="rgba(61,207,176,0.2)" stroke="none"/>
-      <path d="${d}" fill="none" stroke="#3dcfb0" stroke-width="2" vector-effect="non-scaling-stroke"/>
-    </svg>
-    <div class="clabel">min ${Math.round(st.min)} m · max ${Math.round(st.max)} m</div>
+    <div id="elevRead" class="clabel" style="text-align:left;margin-bottom:6px">0 m · ${Math.round(prof[0].ele)} m</div>
+    <div id="elevScroll" style="overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:8px">
+      <svg id="elevSvg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+        <path d="${area}" fill="rgba(61,207,176,0.22)" stroke="none"/>
+        <path d="${d}" fill="none" stroke="#3dcfb0" stroke-width="2"/>
+        <line id="elevCursor" x1="${pad}" y1="${pad}" x2="${pad}" y2="${H-pad}" stroke="#f5b942" stroke-width="2"/>
+      </svg>
+    </div>
+    <input id="elevScrub" type="range" min="0" max="${Math.round(prof[prof.length-1].d)}" value="0" step="1" style="width:100%;margin-top:8px"/>
+    <div class="clabel">metro per metro · min ${Math.round(st.min)} m · max ${Math.round(st.max)} m · ${fmtDist(prof[prof.length-1].d)}</div>
   </div>`;
+}
+function bindElevScrub() {
+  const scrub = document.getElementById('elevScrub');
+  const prof = window._elevProf;
+  if (!scrub || !prof || !prof.length) return;
+  const move = () => {
+    const m = Number(scrub.value);
+    let best = prof[0];
+    for (const p of prof) { if (p.d <= m) best = p; else break; }
+    const read = document.getElementById('elevRead');
+    if (read) read.textContent = m + ' m · ' + (best.ele!=null ? Number(best.ele).toFixed(1) : '–') + ' m s.l.m.';
+    const svg = document.getElementById('elevSvg');
+    const cur = document.getElementById('elevCursor');
+    if (svg && cur && prof[prof.length-1].d) {
+      const W = svg.width.baseVal.value || 340;
+      const x = 18 + (m / prof[prof.length-1].d) * (W - 36);
+      cur.setAttribute('x1', x); cur.setAttribute('x2', x);
+      const sc = document.getElementById('elevScroll');
+      if (sc) sc.scrollLeft = x - sc.clientWidth / 2;
+    }
+  };
+  scrub.oninput = move;
+  move();
 }
 
 function openTrackDetail(tr) {
@@ -1037,6 +1084,7 @@ function openTrackDetail(tr) {
   }
   document.getElementById('tdStats').innerHTML = stats;
   document.getElementById('tdChart').innerHTML = buildElevChart(tr.points);
+  bindElevScrub();
   document.getElementById('tdActs').innerHTML =
     `<button class="pri" id="tdShow">Vedi su mappa</button>
      <button id="tdGpx">Esporta GPX</button>
@@ -1316,8 +1364,9 @@ async function init(){
 
   document.getElementById('closeCard').onclick=closeCard;
   document.getElementById('navPinClose').onclick=hideNavPin;
+  window.appSavePoi = () => { poiDraft = window._pinLL || null; if (!poiDraft) { status('Tieni premuto un punto sulla mappa'); return; } openPoiSheet(); };
   const navSave = document.getElementById('navPinSave');
-  if (navSave) navSave.onclick = () => { poiDraft = window._pinLL || null; openPoiSheet(); };
+  if (navSave) navSave.onclick = window.appSavePoi;
   document.getElementById('poiOk').onclick = savePoi;
   document.getElementById('poiCancel').onclick = () => document.getElementById('poiSheet').classList.remove('show');
   const poiSort = document.getElementById('poiSort');
