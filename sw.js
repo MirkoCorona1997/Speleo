@@ -1,4 +1,4 @@
-const CACHE_NAME = 'csr-grotte-v75';
+const CACHE_NAME = 'csr-grotte-v78';
 
 self.addEventListener('install', e => {
   self.skipWaiting();

@@ -282,7 +282,7 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
 </style>
 </head>
 <body>
-<div class="ver">v7.5</div>
+<div class="ver">v7.8</div>
 <div class="offline" id="offlineBadge">OFFLINE</div>
 <div class="errbox" id="errbox"></div>
 
@@ -316,6 +316,7 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
     <button class="go" id="applyFilters">Applica</button>
   </div>
   <div class="chip" id="status">Caricamento…</div>
+  <button type="button" id="backupBanner" style="display:none;position:absolute;left:10px;right:10px;bottom:calc(12px + var(--tab) + var(--safe-b));z-index:2400;background:#243044;color:#fff;border:1px solid var(--line);border-radius:14px;padding:12px;text-align:left;font-size:13px">Sono passati 7 giorni. Tocca per scaricare il backup e salvarlo in File.</button>
   <div class="hint-bar">Tieni premuto per navigare</div>
   <div class="mode-chip" id="modeChip">Percorso: vicino al sentiero lo segue, lontano usa il tuo punto</div>
   <div class="track-bar" id="trackBar">
@@ -333,6 +334,9 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
   <p class="sub" id="trCount">0 tracce salvate</p>
   <div class="row" style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
     <button class="tbtn-sm rec" id="btnStartRec">● Registra GPS</button>
+    <label class="tbtn-sm" style="cursor:pointer">Ripristina backup
+      <input type="file" id="backupInputTracce" accept="application/json,.json" style="display:none"/>
+    </label>
     <button class="tbtn-sm acc" id="btnNewRoute">+ Percorso a punti</button>
     <label class="tbtn-sm" style="cursor:pointer">
       Carica GPX
@@ -377,6 +381,13 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
 <div class="view" id="view-preferiti">
   <h1>Preferiti</h1>
   <p class="sub" id="favCount">0 salvate</p>
+  <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+    <button type="button" class="tbtn-sm acc" id="btnBackup">Scarica backup</button>
+    <label class="tbtn-sm" style="cursor:pointer">Ripristina backup
+      <input type="file" id="backupInput" accept="application/json,.json" style="display:none"/>
+    </label>
+  </div>
+  <p style="font-size:12px;color:var(--muted);margin:-6px 0 14px">Il file resta in File anche se cancelli i dati di Safari.</p>
   <div id="favList"></div>
 </div>
 <div class="view" id="view-esplorate">

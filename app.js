@@ -1440,6 +1440,64 @@ function initTrackingUI() {
 }
 
 
+
+async function exportBackup(){
+  const favs = await allFavs();
+  const data = {
+    v: 1,
+    when: new Date().toISOString(),
+    preferiti: favs,
+    tracce: savedTracks,
+    punti: savedPois,
+    esplorate: loadExplored()
+  };
+  const blob = new Blob([JSON.stringify(data)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'grotte-csr-backup.json';
+  a.click();
+  localStorage.setItem('csr-backup-at', String(Date.now()));
+  const ban = document.getElementById('backupBanner');
+  if (ban) ban.style.display = 'none';
+  status('Backup scaricato: salvalo in File');
+}
+function backupDue(){
+  const at = Number(localStorage.getItem('csr-backup-at') || 0);
+  return !at || (Date.now() - at) > 7*24*3600*1000;
+}
+function maybeBackupBanner(){
+  const ban = document.getElementById('backupBanner');
+  if (!ban) return;
+  const due = backupDue();
+  ban.style.display = due ? 'block' : 'none';
+  ban.onclick = () => exportBackup().catch(e => alert(e.message||e));
+  if (due && !sessionStorage.getItem('csr-backup-asked')) {
+    sessionStorage.setItem('csr-backup-asked', '1');
+    setTimeout(() => {
+      if (confirm('Sono passati 7 giorni dall\'ultimo backup. Scaricare ora preferiti, tracce, punti ed esplorate?')) {
+        exportBackup().catch(e => alert(e.message||e));
+      }
+    }, 600);
+  }
+}
+async function importBackup(file){
+  const text = await file.text();
+  const data = JSON.parse(text);
+  if (!data || !data.v) throw new Error('file non valido');
+  if (Array.isArray(data.tracce)) { savedTracks = data.tracce; persistTracks(); }
+  if (Array.isArray(data.punti)) { savedPois = data.punti; persistPois(); drawPois(); }
+  if (Array.isArray(data.esplorate)) saveExplored(data.esplorate);
+  if (Array.isArray(data.preferiti) && db) {
+    const tx = db.transaction(STORE_FAV,'readwrite');
+    const st = tx.objectStore(STORE_FAV);
+    for (const it of data.preferiti) st.put(it);
+    await new Promise((ok,no)=>{ tx.oncomplete=ok; tx.onerror=()=>no(tx.error); });
+  }
+  renderFavs(); renderExplored(); renderTracksList(); renderPoiList();
+  savedTracks.forEach(tr => { if (tr.visible !== false && typeof drawSavedTrack==="function") drawSavedTrack(tr); });
+  status('Backup ripristinato');
+}
+
 async function init(){
   const tb=document.getElementById('trackBar'); if(tb) tb.classList.remove('show');
   const td=document.getElementById('trDetail'); if(td) td.classList.remove('open');
@@ -1458,6 +1516,19 @@ async function init(){
   if (navSave) navSave.onclick = window.appSavePoi;
   document.getElementById('poiOk').onclick = savePoi;
   document.getElementById('poiCancel').onclick = () => { const s=document.getElementById('poiSheet'); s.classList.remove('show'); s.style.display='none'; };
+  const btnBackup = document.getElementById('btnBackup');
+  if (btnBackup) btnBackup.onclick = () => exportBackup().catch(e => alert(e.message||e));
+  maybeBackupBanner();
+  const backupInput = document.getElementById('backupInput');
+  const onRestore = (input) => {
+    const f = input.files && input.files[0];
+    if (!f) return;
+    importBackup(f).catch(() => alert('Backup non valido'));
+    input.value = '';
+  };
+  if (backupInput) backupInput.onchange = () => onRestore(backupInput);
+  const backupTr = document.getElementById('backupInputTracce');
+  if (backupTr) backupTr.onchange = () => onRestore(backupTr);
   const poiSort = document.getElementById('poiSort');
   if (poiSort) poiSort.onchange = () => renderPoiList();
   renderPoiList();
