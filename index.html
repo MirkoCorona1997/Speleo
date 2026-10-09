@@ -59,7 +59,7 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
 }
 
 .card{
-  position:absolute;left:10px;right:10px;bottom:10px;z-index:1100;
+  position:absolute;left:10px;right:10px;bottom:calc(8px + var(--tab) + var(--safe-b));z-index:1100;
   background:var(--panel);border-radius:16px;border:1px solid var(--line);
   box-shadow:0 8px 40px rgba(0,0,0,.5);
   transform:translateY(120%);opacity:0;transition:transform .25s ease,opacity .2s ease;
@@ -83,7 +83,7 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
 .bc{grid-column:1/-1;background:transparent;color:var(--muted);font-size:12px!important;height:36px!important}
 
 .nav-pin-info{
-  position:absolute;left:10px;right:10px;bottom:10px;z-index:1100;
+  position:absolute;left:10px;right:10px;bottom:calc(8px + var(--tab) + var(--safe-b));z-index:1100;
   background:var(--panel);border-radius:16px;border:1px solid var(--line);
   padding:14px 16px;display:none;box-shadow:0 8px 40px rgba(0,0,0,.5);
 }
@@ -160,7 +160,7 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
 </style>
 </head>
 <body>
-<div class="ver">v4.1</div>
+<div class="ver">v4.2</div>
 <div class="offline" id="offlineBadge">OFFLINE</div>
 <div class="errbox" id="errbox"></div>
 

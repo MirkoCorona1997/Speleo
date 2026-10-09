@@ -66,30 +66,45 @@ function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').
 /* Fetch real name from SIRA (via CORS proxies, with fallback) */
 async function fetchNomeOnline(id_ost){
   if(!id_ost || !navigator.onLine) return null;
-  const target=encodeURIComponent(`https://portal.sardegnasira.it/dettaglio-grotte-aree-carsiche?id_ost=${id_ost}&tipologia=Grotta`);
+  const pageUrl=`https://portal.sardegnasira.it/dettaglio-grotte-aree-carsiche?id_ost=${id_ost}&tipologia=Grotta`;
   const proxies=[
-    `https://api.allorigins.win/raw?url=${target}`,
-    `https://corsproxy.io/?${target}`
+    `https://api.allorigins.win/get?url=${encodeURIComponent(pageUrl)}`,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(pageUrl)}`,
+    `https://corsproxy.io/?${encodeURIComponent(pageUrl)}`
   ];
   for(const proxy of proxies){
     try{
       const ctrl=new AbortController();
-      const t=setTimeout(()=>ctrl.abort(),12000);
-      const res=await fetch(proxy,{signal:ctrl.signal});
+      const t=setTimeout(()=>ctrl.abort(),14000);
+      const res=await fetch(proxy,{signal:ctrl.signal, cache:'no-store'});
       clearTimeout(t);
       if(!res.ok) continue;
-      const html=await res.text();
-      const m=html.match(/Denominazione sito:[\s\S]*?<span class="td-content">([^<]{2,100})<\/span>/i);
-      let nome=m?m[1].trim():null;
-      if(!nome){
-        const m2=html.match(/Denominazione sito:[\s\S]{0,200}?>(Grotta[^<]{3,80}|Abisso[^<]{3,60}|Voragine[^<]{3,60}|Pozzo[^<]{3,60}|Brecca[^<]{3,60})/i);
-        if(m2) nome=m2[1].trim();
+      let html=await res.text();
+      // allorigins /get returns JSON wrapper
+      if(html.trim().startsWith('{')){
+        try{
+          const j=JSON.parse(html);
+          html=j.contents||j.data||html;
+        }catch(e){}
       }
-      let codice=null;
-      const mc=html.match(/Codice grotta:[\s\S]*?<span class="td-content">(\d{2,6})<\/span>/i);
-      if(mc) codice=mc[1].trim();
-      if(nome) return {nome, codice};
-    }catch(e){ /* try next proxy */ }
+      if(!html || html.length<500) continue;
+      let nome=null, codice=null;
+      let m=html.match(/Denominazione sito:[\s\S]*?<span class="td-content">\s*([^<]{2,100}?)\s*<\/span>/i);
+      if(m) nome=m[1].trim();
+      if(!nome){
+        m=html.match(/Denominazione sito:[\s\S]{0,300}?td-content">\s*([^<]{2,100}?)\s*</i);
+        if(m) nome=m[1].trim();
+      }
+      if(!nome){
+        m=html.match(/>(Grotta [A-Za-zÀ-ú0-9'\.\- ]{3,60}|Abisso [A-Za-zÀ-ú0-9'\.\- ]{3,50}|Brecca [A-Za-zÀ-ú0-9'\.\- ]{3,50})</);
+        if(m) nome=m[1].trim();
+      }
+      m=html.match(/Codice grotta:[\s\S]*?<span class="td-content">\s*(\d{2,6})\s*<\/span>/i);
+      if(m) codice=m[1].trim();
+      if(nome && nome.length>2 && nome.toLowerCase()!=='n/d'){
+        return {nome, codice};
+      }
+    }catch(e){ console.warn('proxy fail', e); }
   }
   return null;
 }
@@ -113,7 +128,7 @@ async function resolveNome(f){
   // 3) online
   const titleEl=document.getElementById('cardTitle');
   const idEl=document.getElementById('cardId');
-  if(titleEl) titleEl.innerHTML=esc(f.properties.nome)+' <span style="font-size:12px;color:#9aabbc;font-weight:500">…</span>';
+  if(titleEl) titleEl.innerHTML=esc(f.properties.nome)+' <span style="font-size:11px;color:#3dcfb0;font-weight:500"> cercando nome…</span>';
 
   const data=await fetchNomeOnline(id);
   if(data && data.nome){
@@ -128,6 +143,8 @@ async function resolveNome(f){
     return f.properties.nome;
   } else {
     if(titleEl && cur===f) titleEl.textContent=f.properties.nome;
+    const idEl2=document.getElementById('cardId');
+    if(idEl2 && cur===f && !f.properties.nome_reale) idEl2.textContent=(idEl2.textContent||'')+' · nome non disponibile online';
     return f.properties.nome;
   }
 }
