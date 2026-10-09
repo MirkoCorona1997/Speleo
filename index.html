@@ -176,9 +176,9 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
   transform-origin: 50% 70%;
 }
 .track-bar {
-  position: absolute; left: 10px; right: 10px;
-  bottom: calc(8px + var(--tab) + var(--safe-b));
-  z-index: 950; display: none;
+  position: fixed; left: 10px; right: 10px;
+  bottom: calc(12px + var(--tab) + var(--safe-b));
+  z-index: 2600; display: none; pointer-events: auto;
   background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
   padding: 10px 12px; box-shadow: 0 6px 24px rgba(0,0,0,.4);
 }
@@ -197,12 +197,12 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
   cursor: pointer; box-shadow: 0 0 0 1px var(--line);
 }
 .color-dot.on { box-shadow: 0 0 0 2px var(--accent); }
-#view-tracce {
+#view-tracce, #view-punti {
   background: var(--bg); overflow-y: auto; -webkit-overflow-scrolling: touch;
   padding: max(16px, var(--safe-t)) 14px 20px; z-index: 2;
 }
-#view-tracce h1 { font-size: 24px; font-weight: 800; margin-bottom: 2px; }
-#view-tracce .sub { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+#view-tracce h1, #view-punti h1 { font-size: 24px; font-weight: 800; margin-bottom: 2px; }
+#view-tracce .sub, #view-punti .sub { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
 .tr-card {
   background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
   padding: 12px 14px; margin-bottom: 8px;
@@ -282,7 +282,7 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
 </style>
 </head>
 <body>
-<div class="ver">v6.2</div>
+<div class="ver">v6.7</div>
 <div class="offline" id="offlineBadge">OFFLINE</div>
 <div class="errbox" id="errbox"></div>
 
@@ -321,9 +321,9 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
   <div class="track-bar" id="trackBar">
     <div class="row">
       <div class="info"><strong id="trackStat">—</strong><span id="trackSub">Traccia GPS</span></div>
-      <button class="tbtn-sm rec" id="btnStopTrack">Stop</button>
-      <button class="tbtn-sm" id="btnCancelTrack">Annulla</button>
-      <button class="tbtn-sm acc" id="btnSaveTrack">Salva</button>
+      <button type="button" class="tbtn-sm rec" id="btnStopTrack" onclick="window.appStop && window.appStop()">Stop</button>
+      <button type="button" class="tbtn-sm" id="btnCancelTrack" onclick="window.appCancel && window.appCancel()">Annulla</button>
+      <button type="button" class="tbtn-sm acc" id="btnSaveTrack" onclick="window.appSave && window.appSave()">Salva</button>
     </div>
   </div>
 </div>
@@ -339,6 +339,15 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
       <input type="file" id="gpxInput" accept=".gpx,application/gpx+xml" style="display:none"/>
     </label>
   </div>
+  <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;font-size:13px;color:var(--muted)">
+    Ordina
+    <select id="trSort" style="flex:1;height:36px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--text);padding:0 8px">
+      <option value="new">Data, più recenti</option>
+      <option value="old">Data, più vecchie</option>
+      <option value="az">Nome A–Z</option>
+      <option value="za">Nome Z–A</option>
+    </select>
+  </label>
   <div id="colorPick" style="display:flex;gap:8px;margin-bottom:14px">
     <span style="font-size:12px;color:var(--muted);line-height:22px">Colore:</span>
     <div class="color-dot on" data-c="#3dcfb0" style="background:#3dcfb0"></div>
@@ -351,6 +360,20 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
   <div id="trList"></div>
 </div>
 
+<div class="view" id="view-punti">
+  <h1>Segnaposti</h1>
+  <p class="sub" id="poiCount">0 punti</p>
+  <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;font-size:13px;color:var(--muted)">
+    Ordina
+    <select id="poiSort" style="flex:1;height:36px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--text);padding:0 8px">
+      <option value="new">Data, più recenti</option>
+      <option value="old">Data, più vecchi</option>
+      <option value="az">Nome A–Z</option>
+      <option value="za">Nome Z–A</option>
+    </select>
+  </label>
+  <div id="poiList"></div>
+</div>
 <div class="view" id="view-preferiti">
   <h1>Preferiti</h1>
   <p class="sub" id="favCount">0 salvate</p>
@@ -373,6 +396,7 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
   <p id="navPinText">Punto selezionato</p>
   <div class="row">
     <a class="ba" id="navPinGoogle" href="#" target="_blank">Google Maps</a>
+    <button class="bb" id="navPinSave">Salva punto</button>
     <button class="bb" id="navPinClose">✕</button>
   </div>
 </div>
@@ -390,9 +414,20 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
   <div class="td-acts" id="tdActs"></div>
 </div>
 
+<div class="nav-pin-info" id="poiSheet" style="z-index:2700">
+  <p id="poiTitle">Salva punto</p>
+  <input id="poiName" placeholder="Nome del punto" style="width:100%;height:40px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--text);padding:0 10px;margin-bottom:8px"/>
+  <textarea id="poiDesc" placeholder="Descrizione (facoltativa)" style="width:100%;height:64px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--text);padding:8px 10px;margin-bottom:8px"></textarea>
+  <div id="poiTypes" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"></div>
+  <div style="display:flex;gap:8px">
+    <button class="ba" id="poiOk">Salva</button>
+    <button class="bb" id="poiCancel">Annulla</button>
+  </div>
+</div>
 <nav class="tabs">
   <button class="tab on" data-view="map"><span class="i">🗺️</span>Mappa</button>
   <button class="tab" data-view="tracce"><span class="i">📍</span>Tracce</button>
+  <button class="tab" data-view="punti"><span class="i">📌</span>Punti</button>
   <button class="tab" data-view="preferiti"><span class="i">★</span>Preferiti</button>
 </nav>
 

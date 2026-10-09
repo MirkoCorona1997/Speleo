@@ -211,6 +211,7 @@ function switchView(n){
   document.querySelector(`.tab[data-view="${n}"]`).classList.add('on');
   if(n==='preferiti') renderFavs();
   if(n==='tracce') renderTracksList();
+  if(n==='punti') renderPoiList();
   if(n==='map'&&map) setTimeout(()=>map.invalidateSize(),40);
   closeCard(); hideNavPin();
 }
@@ -244,6 +245,141 @@ function initMap(){
   map.getContainer().addEventListener('touchmove',()=>clearTimeout(pressTimer),{passive:true});
   map.getContainer().addEventListener('touchend',()=>clearTimeout(pressTimer),{passive:true});
 }
+
+
+const POI_TYPES = [
+  {id:'grotta', label:'Grotta', icon:'🕳️'},
+  {id:'parcheggio', label:'Parcheggio', icon:'🅿️'},
+  {id:'panchina', label:'Panchina', icon:'🪑'},
+  {id:'acqua', label:'Acqua', icon:'💧'},
+  {id:'bivio', label:'Bivio', icon:'🔀'},
+  {id:'pericolo', label:'Pericolo', icon:'⚠️'},
+  {id:'campo', label:'Campo', icon:'⛺'},
+  {id:'altro', label:'Altro', icon:'📍'}
+];
+let savedPois = [];
+let poiLayer = null;
+let poiDraft = null;
+let poiType = 'grotta';
+function loadPois(){ try { savedPois = JSON.parse(localStorage.getItem('csr-poi')||'[]'); } catch(e){ savedPois=[]; } }
+function persistPois(){ localStorage.setItem('csr-poi', JSON.stringify(savedPois)); }
+function drawPois(){
+  if (!map) return;
+  if (poiLayer) map.removeLayer(poiLayer);
+  poiLayer = L.layerGroup().addTo(map);
+  savedPois.forEach(p => {
+    const t = POI_TYPES.find(x => x.id === p.type) || POI_TYPES[7];
+    const m = L.marker([p.lat, p.lng], {
+      icon: L.divIcon({ className:'', html:`<div style="font-size:22px;filter:drop-shadow(0 1px 2px #000)">${t.icon}</div>`, iconSize:[24,24], iconAnchor:[12,12] })
+    });
+    m.bindPopup(`<strong>${t.icon} ${esc(p.name)}</strong><br><span style="font-size:12px">${t.label}</span><br><button id="poiDel-${p.id}" style="margin-top:6px">Elimina</button>`);
+    m.on('popupopen', () => {
+      const b = document.getElementById('poiDel-'+p.id);
+      if (b) b.onclick = () => { savedPois = savedPois.filter(x => x.id !== p.id); persistPois(); drawPois(); map.closePopup(); };
+    });
+    m.addTo(poiLayer);
+  });
+}
+function openPoiSheet(){
+  if (!poiDraft) return;
+  document.getElementById('poiName').value = '';
+  poiType = 'grotta';
+  const box = document.getElementById('poiTypes');
+  box.innerHTML = POI_TYPES.map(t => `<button type="button" data-t="${t.id}" class="tbtn-sm ${t.id==='grotta'?'acc':''}" style="height:34px">${t.icon} ${t.label}</button>`).join('');
+  box.querySelectorAll('button').forEach(b => b.onclick = () => {
+    poiType = b.dataset.t;
+    box.querySelectorAll('button').forEach(x => x.classList.remove('acc'));
+    b.classList.add('acc');
+  });
+  document.getElementById('poiSheet').classList.add('show');
+}
+function poiNumber(p){
+  const ordered = savedPois.slice().sort((a,b)=>(a.created||0)-(b.created||0));
+  const i = ordered.findIndex(x => x.id === p.id);
+  return i >= 0 ? i + 1 : 0;
+}
+async function savePoi(){
+  if (!poiDraft) return;
+  const name = (document.getElementById('poiName').value || '').trim() || (POI_TYPES.find(t=>t.id===poiType)||{}).label || 'Punto';
+  const desc = (document.getElementById('poiDesc').value || '').trim();
+  status('Quota del punto…');
+  let ele = null;
+  try {
+    const r = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${poiDraft.lat}&longitude=${poiDraft.lng}`);
+    const d = await r.json();
+    if (d.elevation && d.elevation[0] != null) ele = d.elevation[0];
+  } catch(e) {}
+  savedPois.unshift({ id:'p'+Date.now(), name, type: poiType, desc, lat: poiDraft.lat, lng: poiDraft.lng, ele, created: Date.now() });
+  persistPois();
+  drawPois();
+  document.getElementById('poiSheet').classList.remove('show');
+  hideNavPin();
+  status('Punto salvato');
+  renderPoiList();
+}
+function openPoiDetail(p){
+  const t = POI_TYPES.find(x => x.id === p.type) || POI_TYPES[7];
+  document.getElementById('tdTitle').textContent = '#' + poiNumber(p) + ' ' + (p.name || 'Punto');
+  document.getElementById('tdMeta').textContent = t.icon + ' ' + t.label + (p.created ? ' · ' + new Date(p.created).toLocaleString('it-IT') : '');
+  document.getElementById('tdStats').innerHTML =
+    `<div class="stat-box"><div class="sl">Coordinate</div><div class="sv" style="font-size:13px">${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</div></div>` +
+    `<div class="stat-box"><div class="sl">Altitudine</div><div class="sv">${p.ele!=null?Math.round(p.ele)+' m':'n/d'}</div></div>`;
+  document.getElementById('tdChart').innerHTML = `<div class="elev-chart"><div class="clabel">${esc(p.desc || 'Nessuna descrizione')}</div></div>`;
+  document.getElementById('tdActs').innerHTML =
+    `<button class="pri" id="poiGo">Vedi su mappa</button>
+     <a class="pri" style="background:var(--panel2);color:var(--text)" href="https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}" target="_blank">Google Maps</a>
+     <button id="poiDel" style="color:var(--danger)">Elimina</button>`;
+  document.getElementById('trDetail').classList.add('open');
+  document.getElementById('poiGo').onclick = () => {
+    switchView('map');
+    closeTrackDetail();
+    map.setView([p.lat, p.lng], 16);
+  };
+  document.getElementById('poiDel').onclick = () => {
+    if (!confirm('Eliminare il punto?')) return;
+    savedPois = savedPois.filter(x => x.id !== p.id);
+    persistPois(); drawPois(); closeTrackDetail(); renderPoiList();
+  };
+}
+function renderPoiList(){
+  loadPois();
+  const list = document.getElementById('poiList');
+  if (!list) return;
+  document.getElementById('poiCount').textContent = savedPois.length + (savedPois.length===1?' punto':' punti');
+  if (!savedPois.length) {
+    list.innerHTML = '<div class="empty"><div class="big">📌</div><p>Nessun segnaposto</p><p style="font-size:12px;margin-top:6px">Tieni premuto sulla mappa e scegli Salva punto</p></div>';
+    return;
+  }
+  const sort = (document.getElementById('poiSort')||{}).value || 'new';
+  const view = savedPois.slice().sort((a,b) => {
+    if (sort==='az') return (a.name||'').localeCompare(b.name||'', 'it');
+    if (sort==='za') return (b.name||'').localeCompare(a.name||'', 'it');
+    if (sort==='old') return (a.created||0)-(b.created||0);
+    return (b.created||0)-(a.created||0);
+  });
+  list.innerHTML = view.map(p => {
+    const t = POI_TYPES.find(x => x.id === p.type) || POI_TYPES[7];
+    return `<div class="tr-card" data-id="${p.id}">
+      <div class="tr-head"><div class="cname">${t.icon} #${poiNumber(p)} ${esc(p.name)}</div></div>
+      <div class="meta">${t.label} · ${p.lat.toFixed(5)}, ${p.lng.toFixed(5)} · ${p.ele!=null?Math.round(p.ele)+' m':'quota n/d'}</div>
+      <div class="acts"><button data-a="open">Dettagli</button><button data-a="map">Mappa</button><button class="del" data-a="del">Elimina</button></div>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('.tr-card').forEach(card => {
+    const p = savedPois.find(x => x.id === card.dataset.id);
+    const goMap = () => { switchView('map'); map.setView([p.lat, p.lng], 16); if (poiLayer) poiLayer.eachLayer(l => { if (l.getLatLng && l.getLatLng().lat===p.lat) l.openPopup(); }); };
+    card.onclick = () => goMap();
+    card.querySelectorAll('button').forEach(b => b.onclick = (e) => {
+      e.stopPropagation();
+      if (b.dataset.a==='open') openPoiDetail(p);
+      else if (b.dataset.a==='map') goMap();
+      else if (b.dataset.a==='del' && confirm('Eliminare?')) {
+        savedPois = savedPois.filter(x => x.id !== p.id); persistPois(); drawPois(); renderPoiList();
+      }
+    });
+  });
+}
+
 
 function showNavPin(latlng){
   closeCard();
@@ -408,8 +544,12 @@ function fmtDur(ms) {
   return m + 'm ' + sec + 's';
 }
 
+let accCircle = null;
 function updateGpsMarker(latlng, acc) {
   if (!map) return;
+  if (accCircle) accCircle.setLatLng(latlng);
+  else accCircle = L.circle(latlng, { radius: Math.max(acc || 8, 3), color: '#3b9eff', weight: 1, fillColor: '#3b9eff', fillOpacity: 0.12, interactive: false }).addTo(map);
+  if (acc) accCircle.setRadius(Math.max(acc, 3));
   if (!myMarker) {
     const icon = L.divIcon({ className: 'gps-icon', html: '<div class="gps-dot"></div>', iconSize: [22,22], iconAnchor: [11,11] });
     myMarker = L.marker(latlng, { icon, zIndexOffset: 2000, interactive: false }).addTo(map);
@@ -427,11 +567,19 @@ function applyHeading() {
   if (el) el.style.transform = 'rotate(' + heading + 'deg)';
 }
 
+let gpsPoll = null;
+function setHeading(h) {
+  if (h == null || isNaN(h)) return;
+  // smooth
+  let d = ((h - heading + 540) % 360) - 180;
+  heading = (heading + d * 0.45 + 360) % 360;
+  applyHeading();
+}
 async function enableCompass() {
   const onOrient = (e) => {
-    let h = e.webkitCompassHeading;
-    if (h == null && e.alpha != null) h = e.absolute ? (360 - e.alpha) : e.alpha;
-    if (h != null && !isNaN(h)) { heading = h; applyHeading(); }
+    let h = (typeof e.webkitCompassHeading === 'number') ? e.webkitCompassHeading : null;
+    if (h == null && e.alpha != null) h = e.absolute ? (360 - e.alpha) : (360 - e.alpha);
+    setHeading(h);
   };
   if (!window.DeviceOrientationEvent) return;
   try {
@@ -446,13 +594,10 @@ async function enableCompass() {
   } catch (e) { console.warn(e); }
 }
 
-function startGpsWatch() {
-  if (!navigator.geolocation) { showError('GPS non disponibile su questo browser'); return; }
-  if (watchId != null) return;
-  watchId = navigator.geolocation.watchPosition(
-    pos => {
+function onGps(pos) {
       const ll = L.latLng(pos.coords.latitude, pos.coords.longitude);
       updateGpsMarker(ll, pos.coords.accuracy);
+      if (typeof pos.coords.heading === 'number' && !isNaN(pos.coords.heading) && pos.coords.speed > 0.4) setHeading(pos.coords.heading);
       if (recording) {
         const p = { lat: ll.lat, lng: ll.lng, t: Date.now(), ele: (pos.coords.altitude != null && !isNaN(pos.coords.altitude)) ? pos.coords.altitude : null };
         // skip if too close to last
@@ -462,10 +607,14 @@ function startGpsWatch() {
           updateTrackStat();
         }
       }
-    },
-    err => { console.warn(err); },
-    { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
-  );
+}
+function startGpsWatch() {
+  if (!navigator.geolocation) { showError('GPS non disponibile su questo browser'); return; }
+  if (watchId != null) return;
+  const opt = { enableHighAccuracy: true, maximumAge: 0, timeout: 8000 };
+  watchId = navigator.geolocation.watchPosition(onGps, err => { console.warn(err); }, opt);
+  if (gpsPoll) clearInterval(gpsPoll);
+  gpsPoll = setInterval(() => navigator.geolocation.getCurrentPosition(onGps, () => {}, opt), 1000);
 }
 
 
@@ -520,12 +669,26 @@ function stopRecording() {
 }
 function cancelRecording() {
   recording = false;
+  routeMode = false;
   recPoints = [];
   recStart = null;
-  if (recPolyline) { map.removeLayer(recPolyline); recPolyline = null; }
+  routePoints = [];
+  if (typeof clearRouteDraft === 'function') clearRouteDraft();
+  if (recPolyline && map) { map.removeLayer(recPolyline); recPolyline = null; }
+  const chip = document.getElementById('modeChip');
+  if (chip) chip.classList.remove('show');
   hideTrackBar();
   status('Traccia annullata');
 }
+window.appStop = function() {
+  if (routeMode && typeof cancelRouteMode === 'function') cancelRouteMode();
+  else stopRecording();
+};
+window.appCancel = function() { cancelRecording(); };
+window.appSave = function() {
+  if (routeMode) saveRoute();
+  else saveRecording();
+};
 
 async function saveRecording() {
   if (recPoints.length < 2) {
@@ -702,6 +865,20 @@ async function saveRoute() {
   status('Percorso salvato con quote');
 }
 
+function trackNumber(tr) {
+  const ordered = savedTracks.slice().sort((a,b)=>(a.created||0)-(b.created||0));
+  const i = ordered.findIndex(t => t.id === tr.id);
+  return i >= 0 ? i + 1 : 0;
+}
+function showTrackHit(tr, latlng) {
+  const n = trackNumber(tr);
+  const html = `<div style="min-width:160px"><strong>#${n} ${esc(tr.name||'Traccia')}</strong><div style="margin-top:8px"><button id="hitDetail" style="height:32px;border:none;border-radius:8px;background:#3dcfb0;color:#08221c;font-weight:700;padding:0 10px">Dettagli</button></div></div>`;
+  const pop = L.popup({ closeButton: true, autoPan: true }).setLatLng(latlng).setContent(html).openOn(map);
+  setTimeout(() => {
+    const b = document.getElementById('hitDetail');
+    if (b) b.onclick = () => { map.closePopup(); openTrackDetail(tr); };
+  }, 30);
+}
 function drawSavedTrack(tr) {
   if (tr.visible === false) { removeTrackFromMap(tr.id); return; }
   if (trackLayers[tr.id]) {
@@ -711,10 +888,11 @@ function drawSavedTrack(tr) {
   const latlngs = tr.points.map(p => [p.lat, p.lng]);
   const line = L.polyline(latlngs, {
     color: tr.color || '#3dcfb0',
-    weight: 4,
+    weight: 6,
     opacity: 0.9,
     dashArray: tr.type === 'route' ? '8 6' : null
   }).addTo(map);
+  line.on('click', e => { L.DomEvent.stopPropagation(e); showTrackHit(tr, e.latlng); });
   const markers = [];
   if (tr.type === 'route') {
     tr.points.forEach((p, i) => {
@@ -843,7 +1021,7 @@ function buildElevChart(pts) {
 function openTrackDetail(tr) {
   const dist = trackDistance(tr.points);
   const st = elevStats(tr.points);
-  document.getElementById('tdTitle').textContent = tr.name || 'Traccia';
+  document.getElementById('tdTitle').textContent = '#' + trackNumber(tr) + ' ' + (tr.name || 'Traccia');
   document.getElementById('tdMeta').textContent =
     (tr.type === 'route' ? 'Percorso' : tr.type === 'gpx' ? 'GPX' : 'GPS') +
     ' · ' + tr.points.length + ' punti' +
@@ -899,7 +1077,14 @@ function renderTracksList() {
     list.innerHTML = '<div class="empty"><div class="big">📍</div><p>Nessuna traccia</p><p style="font-size:12px;margin-top:6px">Registra col pulsante ● oppure crea un percorso / carica GPX</p></div>';
     return;
   }
-  list.innerHTML = savedTracks.map(tr => {
+  const sort = (document.getElementById('trSort')||{}).value || 'new';
+  const view = savedTracks.slice().sort((a,b) => {
+    if (sort === 'az') return (a.name||'').localeCompare(b.name||'', 'it');
+    if (sort === 'za') return (b.name||'').localeCompare(a.name||'', 'it');
+    if (sort === 'old') return (a.created||0) - (b.created||0);
+    return (b.created||0) - (a.created||0);
+  });
+  list.innerHTML = view.map(tr => {
     const dist = trackDistance(tr.points);
     const st = elevStats(tr.points);
     const type = tr.type === 'route' ? 'Percorso' : (tr.type === 'gpx' ? 'GPX' : 'GPS');
@@ -910,7 +1095,7 @@ function renderTracksList() {
     return `<div class="tr-card" data-id="${tr.id}">
       <div class="tr-head">
         <div class="color-dot" style="background:${tr.color||'#3dcfb0'};pointer-events:none"></div>
-        <div class="cname">${esc(tr.name)}</div>
+        <div class="cname">#${trackNumber(tr)} ${esc(tr.name)}</div>
         <span style="font-size:11px;color:var(--muted)">Mappa</span>
         <button class="toggle ${on?'on':''}" data-a="tog" title="Mostra o nascondi sulla mappa"></button>
       </div>
@@ -1096,6 +1281,8 @@ function initTrackingUI() {
     else saveRecording();
   };
   document.getElementById('btnNewRoute').onclick = startRouteMode;
+  const trSort = document.getElementById('trSort');
+  if (trSort) trSort.onchange = () => renderTracksList();
   document.getElementById('gpxInput').onchange = (e) => {
     const f = e.target.files && e.target.files[0];
     if (f) importGpx(f);
@@ -1129,6 +1316,14 @@ async function init(){
 
   document.getElementById('closeCard').onclick=closeCard;
   document.getElementById('navPinClose').onclick=hideNavPin;
+  const navSave = document.getElementById('navPinSave');
+  if (navSave) navSave.onclick = () => { poiDraft = window._pinLL || null; openPoiSheet(); };
+  document.getElementById('poiOk').onclick = savePoi;
+  document.getElementById('poiCancel').onclick = () => document.getElementById('poiSheet').classList.remove('show');
+  const poiSort = document.getElementById('poiSort');
+  if (poiSort) poiSort.onchange = () => renderPoiList();
+  renderPoiList();
+  loadPois(); drawPois();
   document.getElementById('filterBtn').onclick=()=>document.getElementById('filters').classList.toggle('open');
   document.getElementById('applyFilters').onclick=filter;
   document.getElementById('search').oninput=deb(filter,250);
