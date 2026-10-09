@@ -211,7 +211,12 @@ function initMap(){
   map=L.map('map',{zoomControl:false,attributionControl:false}).setView([40.05,9.0],8);
   setTimeout(()=>{try{map.invalidateSize();}catch(e){}},200);
   setTimeout(()=>{try{map.invalidateSize();}catch(e){}},600);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18}).addTo(map);
+  baseOsm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18, attribution:'© OSM'});
+  baseTopo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',{
+    maxZoom:17,
+    attribution:'© OpenTopoMap (CC-BY-SA)'
+  });
+  baseOsm.addTo(map);
   L.control.zoom({position:'bottomright'}).addTo(map);
   layer=L.layerGroup().addTo(map);
 
@@ -238,8 +243,7 @@ function showNavPin(latlng){
   const la=latlng.lat.toFixed(5), lo=latlng.lng.toFixed(5);
   document.getElementById('navPinText').textContent=`Punto ${la}, ${lo}`;
   document.getElementById('navPinGoogle').href=`https://www.google.com/maps/dir/?api=1&destination=${la},${lo}&travelmode=driving`;
-  document.getElementById('navPinApple').href=`https://maps.apple.com/?daddr=${la},${lo}&dirflg=d`;
-  document.getElementById('navPin').classList.add('show');
+    document.getElementById('navPin').classList.add('show');
 }
 function hideNavPin(){
   document.getElementById('navPin').classList.remove('show');
@@ -271,22 +275,24 @@ function openCard(f){
     `<span class="pill">${la.toFixed(5)}, ${lo.toFixed(5)}</span>`;
   const codice = p.codice || null;
   const csrScheda = codice ? `https://m.catastospeleologicoregionale.sardegna.it/scheda-catastale/${codice}` : null;
-  // PDF posizionamento e rilievo sono nell'archivio SIRA (link nella scheda dettaglio)
-  const siraUrl = p.scheda_url || null;
+  const csrPos = codice ? `https://www.catastospeleologicoregionale.sardegna.it/scheda-posizionamento/${codice}` : null;
+  const csrRilievo = codice ? `https://www.catastospeleologicoregionale.sardegna.it/rilievo-pdf/${codice}` : null;
   let docs = '';
   if (csrScheda) {
-    docs += `<a class="ba" href="${csrScheda}" target="_blank" rel="noopener">Scheda completa CSR</a>`;
+    docs += `<a class="ba" href="${csrScheda}" target="_blank" rel="noopener">Scheda completa</a>`;
   }
-  if (siraUrl) {
-    docs += `<a class="bb" href="${siraUrl}" target="_blank" rel="noopener">Scheda posizionamento (PDF)</a>`;
-    docs += `<a class="bb" href="${siraUrl}" target="_blank" rel="noopener">Rilievo PDF / DWF</a>`;
-  } else if (!csrScheda) {
-    docs += `<span class="bc" style="opacity:.7">Documenti non disponibili</span>`;
+  if (csrPos) {
+    docs += `<a class="bb" href="${csrPos}" target="_blank" rel="noopener">Scheda posizionamento</a>`;
+  }
+  if (csrRilievo) {
+    docs += `<a class="bb" href="${csrRilievo}" target="_blank" rel="noopener">Rilievo PDF</a>`;
+  }
+  if (!csrScheda && !csrPos && !csrRilievo) {
+    docs += `<span class="bc" style="opacity:.7">Documenti non disponibili (manca n. catastale)</span>`;
   }
   document.getElementById('cardActions').innerHTML =
     docs +
     `<a class="bb" href="https://www.google.com/maps/dir/?api=1&destination=${la},${lo}&travelmode=driving" target="_blank" rel="noopener">Google Maps</a>` +
-    `<a class="bb" href="https://maps.apple.com/?daddr=${la},${lo}&dirflg=d" target="_blank" rel="noopener">Apple Maps</a>` +
     `<button class="bc" id="saveBtn">★  Salva offline</button>`;
   document.getElementById('card').classList.add('open');
   document.getElementById('saveBtn')?.addEventListener('click',()=>saveFav(f));
@@ -335,6 +341,7 @@ function showError(msg){
 /* ========== GPS + Tracce GPX ========== */
 const STORE_TR = 'tracce';
 const TRACK_COLORS = ['#3dcfb0','#3b9eff','#f5b942','#e85d5d','#c084fc','#fb923c'];
+let baseOsm, baseTopo, topoOn = false;
 let watchId = null;
 let orientHandler = null;
 let myMarker = null, myArrow = null;
@@ -505,26 +512,30 @@ function stopRecording() {
   document.getElementById('trackSub').textContent = recPoints.length + ' punti · fermata';
 }
 
-function saveRecording() {
+async function saveRecording() {
   if (recPoints.length < 2) {
     alert('Traccia troppo corta');
     return;
   }
   const name = prompt('Nome traccia', 'Traccia ' + new Date().toLocaleString('it-IT', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }));
   if (name == null) return;
+  status('Calcolo quote…');
+  const pts = recPoints.map(p => ({ lat: p.lat, lng: p.lng, t: p.t, ele: p.ele }));
+  // fill missing elevations from DEM
+  const need = pts.some(p => p.ele == null);
+  if (need) await fetchElevations(pts);
   const tr = {
     id: 't' + Date.now(),
     name: name || 'Traccia',
     color: activeColor,
     type: 'gps',
-    points: recPoints.slice(),
+    points: pts,
     visible: true,
     created: Date.now()
   };
   savedTracks.unshift(tr);
   persistTracks();
   drawSavedTrack(tr);
-  // cleanup
   recPoints = [];
   if (recPolyline) { map.removeLayer(recPolyline); recPolyline = null; }
   document.getElementById('trackBar').classList.remove('show');
@@ -590,19 +601,22 @@ function cancelRouteMode() {
   document.getElementById('btnSaveTrack').onclick = saveRecording;
 }
 
-function saveRoute() {
+async function saveRoute() {
   if (routePoints.length < 2) {
     alert('Aggiungi almeno 2 punti');
     return;
   }
   const name = prompt('Nome percorso', 'Percorso ' + new Date().toLocaleString('it-IT', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }));
   if (name == null) return;
+  status('Calcolo quote dal modello digitale…');
+  const pts = routePoints.map(p => ({ lat: p.lat, lng: p.lng }));
+  await fetchElevations(pts);
   const tr = {
     id: 'r' + Date.now(),
     name: name || 'Percorso',
     color: activeColor,
     type: 'route',
-    points: routePoints.map(p => ({ lat: p.lat, lng: p.lng })),
+    points: pts,
     visible: true,
     created: Date.now()
   };
@@ -611,7 +625,7 @@ function saveRoute() {
   drawSavedTrack(tr);
   cancelRouteMode();
   renderTracksList();
-  status('Percorso salvato');
+  status('Percorso salvato con quote');
 }
 
 function drawSavedTrack(tr) {
@@ -646,6 +660,52 @@ function removeTrackFromMap(id) {
   }
 }
 
+
+
+async function fetchElevations(points) {
+  // Sample max ~40 points to stay within API limits
+  const n = points.length;
+  if (n === 0) return points;
+  const step = Math.max(1, Math.floor(n / 40));
+  const idxs = [];
+  for (let i = 0; i < n; i += step) idxs.push(i);
+  if (idxs[idxs.length - 1] !== n - 1) idxs.push(n - 1);
+
+  const lats = idxs.map(i => points[i].lat.toFixed(5)).join(',');
+  const lngs = idxs.map(i => points[i].lng.toFixed(5)).join(',');
+  try {
+    const url = `https://api.open-meteo.com/v1/elevation?latitude=${lats}&longitude=${lngs}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('elev ' + res.status);
+    const data = await res.json();
+    const elevs = data.elevation || [];
+    // map sampled elevations back, interpolate for others
+    const sampled = {};
+    idxs.forEach((idx, j) => {
+      if (elevs[j] != null) sampled[idx] = elevs[j];
+    });
+    const keys = Object.keys(sampled).map(Number).sort((a,b)=>a-b);
+    for (let i = 0; i < n; i++) {
+      if (sampled[i] != null) {
+        points[i].ele = sampled[i];
+        continue;
+      }
+      // linear interp between surrounding samples
+      let lo = keys[0], hi = keys[keys.length-1];
+      for (let k = 0; k < keys.length - 1; k++) {
+        if (keys[k] <= i && keys[k+1] >= i) { lo = keys[k]; hi = keys[k+1]; break; }
+      }
+      if (hi === lo) points[i].ele = sampled[lo];
+      else {
+        const t = (i - lo) / (hi - lo);
+        points[i].ele = sampled[lo] * (1 - t) + sampled[hi] * t;
+      }
+    }
+  } catch (e) {
+    console.warn('Elevation fetch failed', e);
+  }
+  return points;
+}
 
 function elevStats(pts) {
   const eles = pts.map(p => p.ele).filter(e => e != null && !isNaN(e));
@@ -893,13 +953,20 @@ function importGpx(file) {
         visible: true,
         created: Date.now()
       };
-      savedTracks.unshift(tr);
-      persistTracks();
-      drawSavedTrack(tr);
-      renderTracksList();
-      switchView('map');
-      map.fitBounds(pts.map(p => [p.lat, p.lng]), { padding: [40, 40] });
-      status('GPX importato: ' + pts.length + ' punti');
+      (async () => {
+        if (pts.some(p => p.ele == null)) {
+          status('Calcolo quote mancanti…');
+          await fetchElevations(pts);
+          tr.points = pts;
+        }
+        savedTracks.unshift(tr);
+        persistTracks();
+        drawSavedTrack(tr);
+        renderTracksList();
+        switchView('map');
+        map.fitBounds(pts.map(p => [p.lat, p.lng]), { padding: [40, 40] });
+        status('GPX importato: ' + pts.length + ' punti');
+      })();
     } catch (e) {
       alert('Errore lettura GPX');
       console.error(e);
@@ -914,6 +981,24 @@ function initTrackingUI() {
   renderTracksList();
 
   document.getElementById('tdClose') && (document.getElementById('tdClose').onclick = closeTrackDetail);
+  
+  const btnTopo = document.getElementById('btnTopo');
+  if (btnTopo) {
+    btnTopo.onclick = () => {
+      topoOn = !topoOn;
+      btnTopo.classList.toggle('on', topoOn);
+      if (topoOn) {
+        map.removeLayer(baseOsm);
+        baseTopo.addTo(map);
+        status('Mappa topografica (OpenTopoMap)');
+      } else {
+        map.removeLayer(baseTopo);
+        baseOsm.addTo(map);
+        status('Mappa OpenStreetMap');
+      }
+    };
+  }
+
   document.getElementById('fabTrack').onclick = () => {
     if (recording) {
       stopRecording();

@@ -42,6 +42,7 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
   display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;
 }
 .tbtn.acc{background:var(--accent2);border-color:var(--accent2);color:#fff}
+.tbtn.on{background:var(--accent2);border-color:var(--accent2);color:#fff}
 
 .filters{
   position:absolute;top:calc(62px + var(--safe-t));left:12px;right:12px;z-index:999;
@@ -279,7 +280,7 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
 </style>
 </head>
 <body>
-<div class="ver">v5.4</div>
+<div class="ver">v5.6</div>
 <div class="offline" id="offlineBadge">OFFLINE</div>
 <div class="errbox" id="errbox"></div>
 
@@ -288,6 +289,7 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
   <div class="top">
     <input class="search" id="search" type="search" placeholder="Cerca nome o n. catastale…" enterkeyhint="search"/>
     <button class="tbtn" id="filterBtn">☰</button>
+    <button class="tbtn" id="btnTopo" title="Mappa topografica">⛰</button>
     <button class="tbtn acc" id="locateBtn">◎</button>
   </div>
   <div class="filters" id="filters">
@@ -368,7 +370,6 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
   <p id="navPinText">Punto selezionato</p>
   <div class="row">
     <a class="ba" id="navPinGoogle" href="#" target="_blank">Google Maps</a>
-    <a class="bb" id="navPinApple" href="#" target="_blank">Apple Maps</a>
     <button class="bb" id="navPinClose">✕</button>
   </div>
 </div>
