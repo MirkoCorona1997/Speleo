@@ -282,7 +282,7 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
 </style>
 </head>
 <body>
-<div class="ver">v7.2</div>
+<div class="ver">v7.4</div>
 <div class="offline" id="offlineBadge">OFFLINE</div>
 <div class="errbox" id="errbox"></div>
 
@@ -397,7 +397,7 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
   <div class="row">
     <a class="ba" id="navPinGoogle" href="#" target="_blank">Google Maps</a>
     <button type="button" class="bb" id="navPinSave" onclick="window.appSavePoi && window.appSavePoi()">Salva punto</button>
-    <button type="button" class="bb" id="navPinRoute" onclick="window.appRouteFromPin && window.appRouteFromPin()">Traccia da qui</button>
+    <button type="button" class="bb" id="navPinRoute" onclick="window.appRouteFromPin && window.appRouteFromPin(this)">Traccia da qui</button>
     <button class="bb" id="navPinClose">✕</button>
   </div>
 </div>

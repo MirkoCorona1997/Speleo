@@ -394,14 +394,24 @@ function showNavPin(latlng){
   const la=latlng.lat.toFixed(5), lo=latlng.lng.toFixed(5);
   document.getElementById('navPinText').textContent=`Punto ${la}, ${lo}`;
   document.getElementById('navPinGoogle').href=`https://www.google.com/maps/dir/?api=1&destination=${la},${lo}&travelmode=driving`;
-    document.getElementById('navPin').classList.add('show');
+  const rb = document.getElementById('navPinRoute');
+  if (rb) { rb.dataset.lat = latlng.lat; rb.dataset.lng = latlng.lng; }
+  document.getElementById('navPin').classList.add('show');
 }
-window.appRouteFromPin = function(){
-  const ll = window._pinLL;
-  if (!ll) { status('Tieni premuto un punto sulla mappa'); return; }
+window.appRouteFromPin = function(btn){
+  let ll = window._pinLL;
+  if ((!ll || ll.lat == null) && btn && btn.dataset.lat) {
+    ll = L.latLng(parseFloat(btn.dataset.lat), parseFloat(btn.dataset.lng));
+  }
+  if (!ll || ll.lat == null) { status('Tieni premuto un punto sulla mappa'); return; }
   hideNavPin();
   startRouteMode();
+  const bar = document.getElementById('trackBar');
+  if (bar) bar.classList.add('show');
+  const sub = document.getElementById('trackSub');
+  if (sub) sub.textContent = 'Percorso a punti';
   onMapClickRoute({ latlng: ll });
+  status('Primo punto aggiunto, tocca la mappa per continuare');
 };
 function hideNavPin(){
   document.getElementById('navPin').classList.remove('show');
@@ -1165,6 +1175,7 @@ function renderTracksList() {
         <button data-a="open">Dettagli</button>
         <button data-a="map">Vai alla mappa</button>
         <button data-a="gpx">GPX</button>
+        <button data-a="color">Colore</button>
         <button class="del" data-a="del">Elimina</button>
       </div>
     </div>`;
@@ -1191,6 +1202,13 @@ function renderTracksList() {
           switchView('map');
           const ll = tr.points.map(p => [p.lat, p.lng]);
           if (ll.length) map.fitBounds(ll, { padding: [50, 50] });
+        } else if (a === 'color' && tr) {
+          const cols = ['#3dcfb0','#3b9eff','#f5b942','#e85d5d','#c084fc','#fb923c'];
+          const i = cols.indexOf(tr.color || '#3dcfb0');
+          tr.color = cols[(i + 1) % cols.length];
+          persistTracks();
+          if (tr.visible !== false) drawSavedTrack(tr);
+          renderTracksList();
         } else if (a === 'gpx' && tr) {
           exportGpx(tr);
         } else if (a === 'del') {
