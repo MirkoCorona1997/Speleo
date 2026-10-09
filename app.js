@@ -280,6 +280,11 @@ function drawPois(){
     m.addTo(poiLayer);
   });
 }
+window.appSavePoi = function(){
+  poiDraft = window._pinLL || null;
+  if (!poiDraft) { status('Tieni premuto un punto sulla mappa'); return; }
+  openPoiSheet();
+};
 function openPoiSheet(){
   if (!poiDraft) return;
   document.getElementById('poiName').value = '';
@@ -383,6 +388,7 @@ function renderPoiList(){
 
 function showNavPin(latlng){
   closeCard();
+  window._pinLL = latlng;
   if(navMarker) map.removeLayer(navMarker);
   navMarker=L.circleMarker(latlng,{radius:10,color:'#3dcfb0',fillColor:'#3dcfb0',fillOpacity:0.35,weight:2}).addTo(map);
   const la=latlng.lat.toFixed(5), lo=latlng.lng.toFixed(5);
@@ -1373,7 +1379,7 @@ async function init(){
   const navSave = document.getElementById('navPinSave');
   if (navSave) navSave.onclick = window.appSavePoi;
   document.getElementById('poiOk').onclick = savePoi;
-  document.getElementById('poiCancel').onclick = () => document.getElementById('poiSheet').classList.remove('show'); document.getElementById('poiSheet').style.display='none';
+  document.getElementById('poiCancel').onclick = () => { const s=document.getElementById('poiSheet'); s.classList.remove('show'); s.style.display='none'; };
   const poiSort = document.getElementById('poiSort');
   if (poiSort) poiSort.onchange = () => renderPoiList();
   renderPoiList();
