@@ -142,12 +142,12 @@ async function resolveNome(f){
   const data=await fetchNomeOnline(id);
   if(data && data.nome){
     f.properties.nome_reale=data.nome;
-    f.properties.codice=data.codice||null;
-    f.properties.nome=data.codice?`${data.codice} - ${data.nome}`:data.nome;
+    f.properties.codice=padCat(data.codice);
+    f.properties.nome=f.properties.codice?`${f.properties.codice} - ${data.nome}`:data.nome;
     saveNameCache(id, data.nome, data.codice);
     if(titleEl && cur===f){
       titleEl.textContent=f.properties.nome;
-      if(idEl) idEl.textContent=data.codice?('N. catastale  '+data.codice):('ID SIRA  '+id);
+      if(idEl) idEl.textContent=f.properties.codice?('N. catastale  '+f.properties.codice):('ID SIRA  '+id);
     }
     return f.properties.nome;
   } else {
@@ -275,8 +275,10 @@ function openCard(f){
   cur=f;
   const p=f.properties;
   const [lo,la]=f.geometry.coordinates;
-  document.getElementById('cardTitle').textContent=p.nome||'Grotta';
   const cat=padCat(p.codice);
+  if(cat) p.codice=cat;
+  const baseName=(p.nome_reale||p.nome||'Grotta').replace(/^\d+\s*-\s*/,'');
+  document.getElementById('cardTitle').textContent=cat?(cat+' - '+baseName):(p.nome||'Grotta');
   document.getElementById('cardId').textContent=cat?('N. catastale  '+cat):(p.id_ost?('ID SIRA  '+p.id_ost):'');
   document.getElementById('cardMeta').innerHTML=
     (p.comune?`<span class="pill"><strong>${esc(p.comune)}</strong></span>`:'')+
@@ -409,10 +411,10 @@ function fmtDur(ms) {
 function updateGpsMarker(latlng, acc) {
   if (!map) return;
   if (!myMarker) {
-    const icon = L.divIcon({ className: '', html: '<div class="gps-dot"></div>', iconSize: [18,18], iconAnchor: [9,9] });
-    myMarker = L.marker(latlng, { icon, zIndexOffset: 1000 }).addTo(map);
-    const aIcon = L.divIcon({ className: '', html: '<div class="gps-arrow" id="gpsArrow"></div>', iconSize: [16,22], iconAnchor: [8,18] });
-    myArrow = L.marker(latlng, { icon: aIcon, zIndexOffset: 999 }).addTo(map);
+    const icon = L.divIcon({ className: 'gps-icon', html: '<div class="gps-dot"></div>', iconSize: [22,22], iconAnchor: [11,11] });
+    myMarker = L.marker(latlng, { icon, zIndexOffset: 2000, interactive: false }).addTo(map);
+    const aIcon = L.divIcon({ className: 'gps-icon', html: '<div class="gps-arrow" id="gpsArrow"></div>', iconSize: [18,26], iconAnchor: [9,22] });
+    myArrow = L.marker(latlng, { icon: aIcon, zIndexOffset: 1999, interactive: false }).addTo(map);
   } else {
     myMarker.setLatLng(latlng);
     myArrow.setLatLng(latlng);
@@ -425,8 +427,26 @@ function applyHeading() {
   if (el) el.style.transform = 'rotate(' + heading + 'deg)';
 }
 
+async function enableCompass() {
+  const onOrient = (e) => {
+    let h = e.webkitCompassHeading;
+    if (h == null && e.alpha != null) h = e.absolute ? (360 - e.alpha) : e.alpha;
+    if (h != null && !isNaN(h)) { heading = h; applyHeading(); }
+  };
+  if (!window.DeviceOrientationEvent) return;
+  try {
+    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+      const s = await DeviceOrientationEvent.requestPermission();
+      if (s !== 'granted') return;
+    }
+    if (orientHandler) window.removeEventListener('deviceorientation', orientHandler, true);
+    window.addEventListener('deviceorientation', onOrient, true);
+    orientHandler = onOrient;
+  } catch (e) { console.warn(e); }
+}
+
 function startGpsWatch() {
-  if (!navigator.geolocation) { showError('GPS non disponibile'); return; }
+  if (!navigator.geolocation) { showError('GPS non disponibile su questo browser'); return; }
   if (watchId != null) return;
   watchId = navigator.geolocation.watchPosition(
     pos => {
@@ -445,33 +465,8 @@ function startGpsWatch() {
     err => { console.warn(err); },
     { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 }
   );
-  // Compass
-  const onOrient = (e) => {
-    let h = e.webkitCompassHeading;
-    if (h == null && e.alpha != null) {
-      // alpha: 0 = north on some devices when absolute
-      h = e.absolute ? (360 - e.alpha) : e.alpha;
-    }
-    if (h != null && !isNaN(h)) {
-      heading = h;
-      applyHeading();
-    }
-  };
-  if (window.DeviceOrientationEvent) {
-    // iOS 13+ needs permission
-    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-      DeviceOrientationEvent.requestPermission().then(s => {
-        if (s === 'granted') {
-          window.addEventListener('deviceorientation', onOrient, true);
-          orientHandler = onOrient;
-        }
-      }).catch(() => {});
-    } else {
-      window.addEventListener('deviceorientation', onOrient, true);
-      orientHandler = onOrient;
-    }
-  }
 }
+
 
 function stopGpsWatch() {
   if (watchId != null) {
@@ -1119,8 +1114,21 @@ async function init(){
   document.getElementById('filterBtn').onclick=()=>document.getElementById('filters').classList.toggle('open');
   document.getElementById('applyFilters').onclick=filter;
   document.getElementById('search').oninput=deb(filter,250);
-  document.getElementById('locateBtn').onclick=()=>map.locate({setView:true,maxZoom:13});
-  map.on('locationfound',e=>{L.circle(e.latlng,{radius:e.accuracy/2,color:'#3dcfb0',fillOpacity:.1,weight:1}).addTo(map);});
+  document.getElementById('locateBtn').onclick=()=>{
+    enableCompass();
+    startGpsWatch();
+    map.locate({setView:true,maxZoom:16});
+    status('Cerco la posizione…');
+  };
+  map.on('locationfound',e=>{
+    updateGpsMarker(e.latlng, e.accuracy);
+    map.setView(e.latlng, Math.max(map.getZoom(), 15));
+  });
+  map.on('locationerror',e=>{ showError('Posizione non disponibile: consenti il GPS'); });
+  const recBtn=document.getElementById('btnStartRec');
+  if(recBtn) recBtn.onclick=()=>{ enableCompass(); if(routeMode) cancelRouteMode(); switchView('map'); startRecording(); status('Registrazione avviata'); };
+  const routeBtn=document.getElementById('btnNewRoute');
+  if(routeBtn) routeBtn.onclick=()=>startRouteMode();
   map.on('dragstart',closeCard);
   document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>switchView(t.dataset.view));
 
@@ -1128,6 +1136,15 @@ async function init(){
     const r=await fetch('grotte_sardegna.geojson');
     const g=await r.json();
     all=g.features||[];
+    all.forEach(f=>{
+      const p=f.properties||{};
+      const cat=padCat(p.codice);
+      if(cat){
+        p.codice=cat;
+        const base=(p.nome_reale||p.nome||'').replace(/^\d+\s*-\s*/,'');
+        if(base) p.nome=cat+' - '+base;
+      }
+    });
     draw(all);
     status(all.length+' grotte');
   }catch(e){status('Errore dati');showError('Impossibile caricare le grotte: '+e.message);console.error(e);}
