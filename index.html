@@ -157,17 +157,136 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
   width:36px!important;height:36px!important;line-height:36px!important;font-size:16px!important;
 }
 .leaflet-control-attribution{display:none!important}
+
+/* GPS + tracks */
+.gps-dot {
+  width: 18px; height: 18px; border-radius: 50%;
+  background: #3b9eff; border: 3px solid #fff;
+  box-shadow: 0 0 0 2px rgba(59,158,255,.4), 0 2px 8px rgba(0,0,0,.4);
+}
+.gps-arrow {
+  width: 0; height: 0;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-bottom: 22px solid #3b9eff;
+  filter: drop-shadow(0 1px 3px rgba(0,0,0,.5));
+  transform-origin: 50% 70%;
+}
+.track-bar {
+  position: absolute; left: 10px; right: 10px;
+  bottom: calc(8px + var(--tab) + var(--safe-b));
+  z-index: 950; display: none;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  padding: 10px 12px; box-shadow: 0 6px 24px rgba(0,0,0,.4);
+}
+.track-bar.show { display: block; }
+.track-bar .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.track-bar .info { flex: 1; font-size: 12px; color: var(--muted); min-width: 100px; }
+.track-bar .info strong { color: var(--text); display: block; font-size: 14px; }
+.tbtn-sm {
+  height: 36px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--panel2); color: var(--text); font-size: 12px; font-weight: 700; cursor: pointer;
+}
+.tbtn-sm.rec { background: #c0392b; border-color: #c0392b; color: #fff; }
+.tbtn-sm.acc { background: var(--accent2); border-color: var(--accent2); color: #fff; }
+.color-dot {
+  width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fff;
+  cursor: pointer; box-shadow: 0 0 0 1px var(--line);
+}
+.color-dot.on { box-shadow: 0 0 0 2px var(--accent); }
+#view-tracce {
+  background: var(--bg); overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: max(16px, var(--safe-t)) 14px 20px; z-index: 2;
+}
+#view-tracce h1 { font-size: 24px; font-weight: 800; margin-bottom: 2px; }
+#view-tracce .sub { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+.tr-card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  padding: 12px 14px; margin-bottom: 8px;
+}
+.tr-card .top { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.tr-card .cname { font-weight: 700; font-size: 14px; flex: 1; }
+.tr-card .meta { font-size: 11px; color: var(--muted); margin-bottom: 8px; }
+.tr-card .acts { display: flex; gap: 6px; flex-wrap: wrap; }
+.tr-card .acts button, .tr-card .acts label {
+  height: 34px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--panel2); color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer;
+  display: inline-flex; align-items: center;
+}
+.tr-card .acts .del { color: var(--danger); }
+.fab-track {
+  position: absolute; right: 12px; bottom: calc(70px + var(--tab) + var(--safe-b));
+  z-index: 900; width: 52px; height: 52px; border-radius: 26px;
+  background: var(--accent2); color: #fff; border: none; font-size: 22px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.4); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.fab-track.on { background: #c0392b; }
+.mode-chip {
+  position: absolute; top: calc(58px + var(--safe-t)); left: 12px; z-index: 900;
+  background: rgba(36,48,68,.95); border: 1px solid var(--line); color: var(--accent);
+  padding: 6px 12px; border-radius: 12px; font-size: 11px; font-weight: 700;
+  display: none;
+}
+.mode-chip.show { display: block; }
+
+
+.tr-detail {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 1150;
+  background: var(--panel); border-radius: 20px 20px 0 0;
+  border-top: 1px solid var(--line);
+  max-height: 70vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  transform: translateY(110%); transition: transform .28s ease;
+  padding: 12px 16px calc(16px + var(--safe-b));
+  box-shadow: 0 -8px 40px rgba(0,0,0,.5);
+}
+.tr-detail.open { transform: translateY(0); }
+.tr-detail h3 { font-size: 17px; font-weight: 800; margin-bottom: 4px; }
+.tr-detail .td-meta { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+.stats-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px;
+}
+.stat-box {
+  background: var(--panel2); border-radius: 12px; padding: 10px 12px;
+}
+.stat-box .sl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.stat-box .sv { font-size: 16px; font-weight: 800; margin-top: 2px; }
+.elev-chart {
+  background: var(--panel2); border-radius: 12px; padding: 10px 8px 6px;
+  margin-bottom: 12px;
+}
+.elev-chart svg { width: 100%; height: 120px; display: block; }
+.elev-chart .clabel { font-size: 11px; color: var(--muted); text-align: center; margin-top: 4px; }
+.td-acts { display: flex; gap: 8px; flex-wrap: wrap; }
+.td-acts button, .td-acts a {
+  flex: 1; min-width: 100px; height: 40px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel2); color: var(--text); font-weight: 700; font-size: 13px;
+  cursor: pointer; display: flex; align-items: center; justify-content: center; text-decoration: none;
+}
+.td-acts .pri { background: var(--accent2); border-color: var(--accent2); color: #fff; }
+.toggle {
+  width: 44px; height: 26px; border-radius: 13px; border: none; cursor: pointer;
+  background: #3a4a63; position: relative; flex-shrink: 0;
+}
+.toggle.on { background: var(--accent2); }
+.toggle::after {
+  content: ''; position: absolute; top: 3px; left: 3px;
+  width: 20px; height: 20px; border-radius: 50%; background: #fff;
+  transition: transform .2s;
+}
+.toggle.on::after { transform: translateX(18px); }
+
 </style>
 </head>
 <body>
-<div class="ver">v4.2</div>
+<div class="ver">v5.3</div>
 <div class="offline" id="offlineBadge">OFFLINE</div>
 <div class="errbox" id="errbox"></div>
 
 <div class="view active" id="view-map">
   <div id="map"></div>
   <div class="top">
-    <input class="search" id="search" type="search" placeholder="Cerca comune…" enterkeyhint="search"/>
+    <input class="search" id="search" type="search" placeholder="Cerca nome o n. catastale…" enterkeyhint="search"/>
     <button class="tbtn" id="filterBtn">☰</button>
     <button class="tbtn acc" id="locateBtn">◎</button>
   </div>
@@ -193,7 +312,38 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
     <button class="go" id="applyFilters">Applica</button>
   </div>
   <div class="chip" id="status">Caricamento…</div>
-  <div class="hint-bar">Tieni premuto per navigare in un punto</div>
+  <div class="hint-bar">Tieni premuto per navigare · FAB per traccia</div>
+  <div class="mode-chip" id="modeChip">Modalità percorso: tocca la mappa</div>
+  <button class="fab-track" id="fabTrack" title="Traccia GPS">●</button>
+  <div class="track-bar" id="trackBar">
+    <div class="row">
+      <div class="info"><strong id="trackStat">—</strong><span id="trackSub">Traccia GPS</span></div>
+      <button class="tbtn-sm rec" id="btnStopTrack">Stop</button>
+      <button class="tbtn-sm acc" id="btnSaveTrack">Salva</button>
+    </div>
+  </div>
+</div>
+
+<div class="view" id="view-tracce">
+  <h1>Tracce</h1>
+  <p class="sub" id="trCount">0 tracce salvate</p>
+  <div class="row" style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+    <button class="tbtn-sm acc" id="btnNewRoute">+ Percorso a punti</button>
+    <label class="tbtn-sm" style="cursor:pointer">
+      Carica GPX
+      <input type="file" id="gpxInput" accept=".gpx,application/gpx+xml" style="display:none"/>
+    </label>
+  </div>
+  <div id="colorPick" style="display:flex;gap:8px;margin-bottom:14px">
+    <span style="font-size:12px;color:var(--muted);line-height:22px">Colore:</span>
+    <div class="color-dot on" data-c="#3dcfb0" style="background:#3dcfb0"></div>
+    <div class="color-dot" data-c="#3b9eff" style="background:#3b9eff"></div>
+    <div class="color-dot" data-c="#f5b942" style="background:#f5b942"></div>
+    <div class="color-dot" data-c="#e85d5d" style="background:#e85d5d"></div>
+    <div class="color-dot" data-c="#c084fc" style="background:#c084fc"></div>
+    <div class="color-dot" data-c="#fb923c" style="background:#fb923c"></div>
+  </div>
+  <div id="trList"></div>
 </div>
 
 <div class="view" id="view-preferiti">
@@ -223,8 +373,22 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
   </div>
 </div>
 
+<div class="tr-detail" id="trDetail">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start">
+    <div>
+      <h3 id="tdTitle">Traccia</h3>
+      <div class="td-meta" id="tdMeta"></div>
+    </div>
+    <button class="card-x" id="tdClose">✕</button>
+  </div>
+  <div class="stats-grid" id="tdStats"></div>
+  <div class="elev-chart" id="tdChart"></div>
+  <div class="td-acts" id="tdActs"></div>
+</div>
+
 <nav class="tabs">
   <button class="tab on" data-view="map"><span class="i">🗺️</span>Mappa</button>
+  <button class="tab" data-view="tracce"><span class="i">📍</span>Tracce</button>
   <button class="tab" data-view="preferiti"><span class="i">★</span>Preferiti</button>
 </nav>
 

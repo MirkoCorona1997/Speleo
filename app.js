@@ -201,6 +201,7 @@ function switchView(n){
   document.getElementById('view-'+n).classList.add('active');
   document.querySelector(`.tab[data-view="${n}"]`).classList.add('on');
   if(n==='preferiti') renderFavs();
+  if(n==='tracce') renderTracksList();
   if(n==='map'&&map) setTimeout(()=>map.invalidateSize(),40);
   closeCard(); hideNavPin();
 }
@@ -268,10 +269,24 @@ function openCard(f){
     (p.provincia?`<span class="pill">${esc(p.provincia)}</span>`:'')+
     (p.ambito?`<span class="pill">${esc(p.ambito)}</span>`:'')+
     `<span class="pill">${la.toFixed(5)}, ${lo.toFixed(5)}</span>`;
-  document.getElementById('cardActions').innerHTML=
-    (p.scheda_url?`<a class="ba" href="${p.scheda_url}" target="_blank" rel="noopener">Scheda + PDF</a>`:'')+
-    `<a class="bb" href="https://www.google.com/maps/dir/?api=1&destination=${la},${lo}&travelmode=driving" target="_blank" rel="noopener">Google Maps</a>`+
-    `<a class="bb" href="https://maps.apple.com/?daddr=${la},${lo}&dirflg=d" target="_blank" rel="noopener">Apple Maps</a>`+
+  const codice = p.codice || null;
+  const csrScheda = codice ? `https://m.catastospeleologicoregionale.sardegna.it/scheda-catastale/${codice}` : null;
+  // PDF posizionamento e rilievo sono nell'archivio SIRA (link nella scheda dettaglio)
+  const siraUrl = p.scheda_url || null;
+  let docs = '';
+  if (csrScheda) {
+    docs += `<a class="ba" href="${csrScheda}" target="_blank" rel="noopener">Scheda completa CSR</a>`;
+  }
+  if (siraUrl) {
+    docs += `<a class="bb" href="${siraUrl}" target="_blank" rel="noopener">Scheda posizionamento (PDF)</a>`;
+    docs += `<a class="bb" href="${siraUrl}" target="_blank" rel="noopener">Rilievo PDF / DWF</a>`;
+  } else if (!csrScheda) {
+    docs += `<span class="bc" style="opacity:.7">Documenti non disponibili</span>`;
+  }
+  document.getElementById('cardActions').innerHTML =
+    docs +
+    `<a class="bb" href="https://www.google.com/maps/dir/?api=1&destination=${la},${lo}&travelmode=driving" target="_blank" rel="noopener">Google Maps</a>` +
+    `<a class="bb" href="https://maps.apple.com/?daddr=${la},${lo}&dirflg=d" target="_blank" rel="noopener">Apple Maps</a>` +
     `<button class="bc" id="saveBtn">★  Salva offline</button>`;
   document.getElementById('card').classList.add('open');
   document.getElementById('saveBtn')?.addEventListener('click',()=>saveFav(f));
@@ -316,6 +331,655 @@ function showError(msg){
   setTimeout(()=>el.classList.remove('show'),8000);
 }
 
+
+/* ========== GPS + Tracce GPX ========== */
+const STORE_TR = 'tracce';
+const TRACK_COLORS = ['#3dcfb0','#3b9eff','#f5b942','#e85d5d','#c084fc','#fb923c'];
+let watchId = null;
+let orientHandler = null;
+let myMarker = null, myArrow = null;
+let heading = 0;
+let recording = false;
+let routeMode = false;
+let recPoints = []; // {lat,lng,t}
+let routePoints = []; // {lat,lng}
+let recPolyline = null, routePolyline = null, routeMarkers = [];
+let savedTracks = []; // loaded from IDB
+let trackLayers = {}; // id -> {line, markers}
+let activeColor = '#3dcfb0';
+let recStart = null;
+
+function openTracksDB() {
+  // tracks stored in same DB - ensure store exists via upgrade is hard; use separate key in preferiti style
+  // We recreate DB version bump is complex mid-flight; store tracks as JSON in localStorage + optional IDB put via preferiti pattern
+}
+
+function loadTracks() {
+  try {
+    savedTracks = JSON.parse(localStorage.getItem('csr-tracce') || '[]');
+  } catch(e) { savedTracks = []; }
+  return savedTracks;
+}
+function persistTracks() {
+  localStorage.setItem('csr-tracce', JSON.stringify(savedTracks));
+}
+
+function haversine(a, b) {
+  const R = 6371000;
+  const toR = x => x * Math.PI / 180;
+  const dLat = toR(b.lat - a.lat), dLon = toR(b.lng - a.lng);
+  const lat1 = toR(a.lat), lat2 = toR(b.lat);
+  const h = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+function trackDistance(pts) {
+  let d = 0;
+  for (let i = 1; i < pts.length; i++) d += haversine(pts[i-1], pts[i]);
+  return d;
+}
+function fmtDist(m) {
+  return m >= 1000 ? (m/1000).toFixed(2) + ' km' : Math.round(m) + ' m';
+}
+function fmtDur(ms) {
+  const s = Math.floor(ms/1000);
+  const m = Math.floor(s/60), sec = s % 60;
+  const h = Math.floor(m/60);
+  if (h) return h + 'h ' + (m%60) + 'm';
+  return m + 'm ' + sec + 's';
+}
+
+function updateGpsMarker(latlng, acc) {
+  if (!map) return;
+  if (!myMarker) {
+    const icon = L.divIcon({ className: '', html: '<div class="gps-dot"></div>', iconSize: [18,18], iconAnchor: [9,9] });
+    myMarker = L.marker(latlng, { icon, zIndexOffset: 1000 }).addTo(map);
+    const aIcon = L.divIcon({ className: '', html: '<div class="gps-arrow" id="gpsArrow"></div>', iconSize: [16,22], iconAnchor: [8,18] });
+    myArrow = L.marker(latlng, { icon: aIcon, zIndexOffset: 999 }).addTo(map);
+  } else {
+    myMarker.setLatLng(latlng);
+    myArrow.setLatLng(latlng);
+  }
+  applyHeading();
+}
+
+function applyHeading() {
+  const el = document.getElementById('gpsArrow');
+  if (el) el.style.transform = 'rotate(' + heading + 'deg)';
+}
+
+function startGpsWatch() {
+  if (!navigator.geolocation) { showError('GPS non disponibile'); return; }
+  if (watchId != null) return;
+  watchId = navigator.geolocation.watchPosition(
+    pos => {
+      const ll = L.latLng(pos.coords.latitude, pos.coords.longitude);
+      updateGpsMarker(ll, pos.coords.accuracy);
+      if (recording) {
+        const p = { lat: ll.lat, lng: ll.lng, t: Date.now(), ele: (pos.coords.altitude != null && !isNaN(pos.coords.altitude)) ? pos.coords.altitude : null };
+        // skip if too close to last
+        if (!recPoints.length || haversine(recPoints[recPoints.length-1], p) > 3) {
+          recPoints.push(p);
+          updateRecLine();
+          updateTrackStat();
+        }
+      }
+    },
+    err => { console.warn(err); },
+    { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 }
+  );
+  // Compass
+  const onOrient = (e) => {
+    let h = e.webkitCompassHeading;
+    if (h == null && e.alpha != null) {
+      // alpha: 0 = north on some devices when absolute
+      h = e.absolute ? (360 - e.alpha) : e.alpha;
+    }
+    if (h != null && !isNaN(h)) {
+      heading = h;
+      applyHeading();
+    }
+  };
+  if (window.DeviceOrientationEvent) {
+    // iOS 13+ needs permission
+    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+      DeviceOrientationEvent.requestPermission().then(s => {
+        if (s === 'granted') {
+          window.addEventListener('deviceorientation', onOrient, true);
+          orientHandler = onOrient;
+        }
+      }).catch(() => {});
+    } else {
+      window.addEventListener('deviceorientation', onOrient, true);
+      orientHandler = onOrient;
+    }
+  }
+}
+
+function stopGpsWatch() {
+  if (watchId != null) {
+    navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+  }
+  if (orientHandler) {
+    window.removeEventListener('deviceorientation', orientHandler, true);
+    orientHandler = null;
+  }
+}
+
+function updateRecLine() {
+  const latlngs = recPoints.map(p => [p.lat, p.lng]);
+  if (!recPolyline) {
+    recPolyline = L.polyline(latlngs, { color: activeColor, weight: 4, opacity: 0.9 }).addTo(map);
+  } else {
+    recPolyline.setLatLngs(latlngs);
+  }
+}
+
+function updateTrackStat() {
+  const dist = trackDistance(recPoints);
+  const dur = recStart ? Date.now() - recStart : 0;
+  document.getElementById('trackStat').textContent = fmtDist(dist) + ' · ' + fmtDur(dur);
+  document.getElementById('trackSub').textContent = recPoints.length + ' punti · registrazione';
+}
+
+function startRecording() {
+  startGpsWatch();
+  recording = true;
+  recPoints = [];
+  recStart = Date.now();
+  if (recPolyline) { map.removeLayer(recPolyline); recPolyline = null; }
+  document.getElementById('trackBar').classList.add('show');
+  document.getElementById('fabTrack').classList.add('on');
+  document.getElementById('fabTrack').textContent = '■';
+  updateTrackStat();
+  // center on user once
+  if (myMarker) map.setView(myMarker.getLatLng(), Math.max(map.getZoom(), 15));
+  else map.locate({ setView: true, maxZoom: 16 });
+}
+
+function stopRecording() {
+  recording = false;
+  document.getElementById('fabTrack').classList.remove('on');
+  document.getElementById('fabTrack').textContent = '●';
+  // keep bar until save or discard
+  document.getElementById('trackSub').textContent = recPoints.length + ' punti · fermata';
+}
+
+function saveRecording() {
+  if (recPoints.length < 2) {
+    alert('Traccia troppo corta');
+    return;
+  }
+  const name = prompt('Nome traccia', 'Traccia ' + new Date().toLocaleString('it-IT', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }));
+  if (name == null) return;
+  const tr = {
+    id: 't' + Date.now(),
+    name: name || 'Traccia',
+    color: activeColor,
+    type: 'gps',
+    points: recPoints.slice(),
+    visible: true,
+    created: Date.now()
+  };
+  savedTracks.unshift(tr);
+  persistTracks();
+  drawSavedTrack(tr);
+  // cleanup
+  recPoints = [];
+  if (recPolyline) { map.removeLayer(recPolyline); recPolyline = null; }
+  document.getElementById('trackBar').classList.remove('show');
+  renderTracksList();
+  status('Traccia salvata');
+}
+
+function discardRecording() {
+  recording = false;
+  recPoints = [];
+  if (recPolyline) { map.removeLayer(recPolyline); recPolyline = null; }
+  document.getElementById('trackBar').classList.remove('show');
+  document.getElementById('fabTrack').classList.remove('on');
+  document.getElementById('fabTrack').textContent = '●';
+}
+
+/* Route mode: tap points on map */
+function startRouteMode() {
+  routeMode = true;
+  routePoints = [];
+  clearRouteDraft();
+  document.getElementById('modeChip').classList.add('show');
+  switchView('map');
+  status('Tocca la mappa per aggiungere punti');
+}
+
+function clearRouteDraft() {
+  if (routePolyline) { map.removeLayer(routePolyline); routePolyline = null; }
+  routeMarkers.forEach(m => map.removeLayer(m));
+  routeMarkers = [];
+}
+
+function onMapClickRoute(e) {
+  if (!routeMode) return;
+  routePoints.push({ lat: e.latlng.lat, lng: e.latlng.lng });
+  const m = L.circleMarker(e.latlng, {
+    radius: 7, color: '#fff', weight: 2, fillColor: activeColor, fillOpacity: 1
+  }).addTo(map);
+  routeMarkers.push(m);
+  const latlngs = routePoints.map(p => [p.lat, p.lng]);
+  if (!routePolyline) {
+    routePolyline = L.polyline(latlngs, { color: activeColor, weight: 4, dashArray: '8 6', opacity: 0.95 }).addTo(map);
+  } else {
+    routePolyline.setLatLngs(latlngs);
+  }
+  // show save bar
+  document.getElementById('trackBar').classList.add('show');
+  document.getElementById('trackStat').textContent = routePoints.length + ' waypoint · ' + fmtDist(trackDistance(routePoints));
+  document.getElementById('trackSub').textContent = 'Percorso a punti — Stop per annullare, Salva per confermare';
+  // temporarily repurpose buttons
+  document.getElementById('btnStopTrack').onclick = cancelRouteMode;
+  document.getElementById('btnSaveTrack').onclick = saveRoute;
+}
+
+function cancelRouteMode() {
+  routeMode = false;
+  routePoints = [];
+  clearRouteDraft();
+  document.getElementById('modeChip').classList.remove('show');
+  document.getElementById('trackBar').classList.remove('show');
+  // restore GPS button handlers
+  document.getElementById('btnStopTrack').onclick = () => { stopRecording(); };
+  document.getElementById('btnSaveTrack').onclick = saveRecording;
+}
+
+function saveRoute() {
+  if (routePoints.length < 2) {
+    alert('Aggiungi almeno 2 punti');
+    return;
+  }
+  const name = prompt('Nome percorso', 'Percorso ' + new Date().toLocaleString('it-IT', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }));
+  if (name == null) return;
+  const tr = {
+    id: 'r' + Date.now(),
+    name: name || 'Percorso',
+    color: activeColor,
+    type: 'route',
+    points: routePoints.map(p => ({ lat: p.lat, lng: p.lng })),
+    visible: true,
+    created: Date.now()
+  };
+  savedTracks.unshift(tr);
+  persistTracks();
+  drawSavedTrack(tr);
+  cancelRouteMode();
+  renderTracksList();
+  status('Percorso salvato');
+}
+
+function drawSavedTrack(tr) {
+  if (tr.visible === false) { removeTrackFromMap(tr.id); return; }
+  if (trackLayers[tr.id]) {
+    map.removeLayer(trackLayers[tr.id].line);
+    (trackLayers[tr.id].markers || []).forEach(m => map.removeLayer(m));
+  }
+  const latlngs = tr.points.map(p => [p.lat, p.lng]);
+  const line = L.polyline(latlngs, {
+    color: tr.color || '#3dcfb0',
+    weight: 4,
+    opacity: 0.9,
+    dashArray: tr.type === 'route' ? '8 6' : null
+  }).addTo(map);
+  const markers = [];
+  if (tr.type === 'route') {
+    tr.points.forEach((p, i) => {
+      markers.push(L.circleMarker([p.lat, p.lng], {
+        radius: 5, color: '#fff', weight: 1.5, fillColor: tr.color || '#3dcfb0', fillOpacity: 1
+      }).addTo(map));
+    });
+  }
+  trackLayers[tr.id] = { line, markers };
+}
+
+function removeTrackFromMap(id) {
+  if (trackLayers[id]) {
+    map.removeLayer(trackLayers[id].line);
+    (trackLayers[id].markers || []).forEach(m => map.removeLayer(m));
+    delete trackLayers[id];
+  }
+}
+
+
+function elevStats(pts) {
+  const eles = pts.map(p => p.ele).filter(e => e != null && !isNaN(e));
+  if (eles.length < 2) {
+    return { min: null, max: null, gain: null, loss: null, has: false, eles: [] };
+  }
+  let gain = 0, loss = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i-1].ele, b = pts[i].ele;
+    if (a == null || b == null || isNaN(a) || isNaN(b)) continue;
+    const d = b - a;
+    if (d > 0.5) gain += d;      // filter GPS noise
+    else if (d < -0.5) loss += -d;
+  }
+  return {
+    min: Math.min(...eles),
+    max: Math.max(...eles),
+    gain,
+    loss,
+    has: true,
+    eles: pts.map(p => (p.ele != null && !isNaN(p.ele)) ? p.ele : null)
+  };
+}
+
+function buildElevChart(pts) {
+  const st = elevStats(pts);
+  if (!st.has) {
+    return '<div class="elev-chart"><div class="clabel">Nessun dato altimetrico (registra con GPS o importa GPX con &lt;ele&gt;)</div></div>';
+  }
+  const W = 320, H = 120, pad = 8;
+  const vals = st.eles;
+  // interpolate nulls for display
+  const series = [];
+  let last = st.min;
+  for (let i = 0; i < vals.length; i++) {
+    if (vals[i] != null) last = vals[i];
+    series.push(last);
+  }
+  const minE = Math.min(...series), maxE = Math.max(...series);
+  const range = Math.max(maxE - minE, 1);
+  const n = series.length;
+  let d = '';
+  series.forEach((e, i) => {
+    const x = pad + (i / Math.max(n - 1, 1)) * (W - 2 * pad);
+    const y = pad + (1 - (e - minE) / range) * (H - 2 * pad);
+    d += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1) + ' ';
+  });
+  // area fill
+  const x0 = pad, x1 = pad + (W - 2 * pad);
+  const yBase = H - pad;
+  const area = d + `L${x1},${yBase} L${x0},${yBase} Z`;
+  return `<div class="elev-chart">
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      <path d="${area}" fill="rgba(61,207,176,0.2)" stroke="none"/>
+      <path d="${d}" fill="none" stroke="#3dcfb0" stroke-width="2" vector-effect="non-scaling-stroke"/>
+    </svg>
+    <div class="clabel">min ${Math.round(st.min)} m · max ${Math.round(st.max)} m</div>
+  </div>`;
+}
+
+function openTrackDetail(tr) {
+  const dist = trackDistance(tr.points);
+  const st = elevStats(tr.points);
+  document.getElementById('tdTitle').textContent = tr.name || 'Traccia';
+  document.getElementById('tdMeta').textContent =
+    (tr.type === 'route' ? 'Percorso' : tr.type === 'gpx' ? 'GPX' : 'GPS') +
+    ' · ' + tr.points.length + ' punti' +
+    (tr.created ? ' · ' + new Date(tr.created).toLocaleDateString('it-IT') : '');
+  let stats = `<div class="stat-box"><div class="sl">Distanza</div><div class="sv">${(dist/1000).toFixed(2)} km</div></div>`;
+  if (st.has) {
+    stats += `<div class="stat-box"><div class="sl">Dislivello +</div><div class="sv">+${Math.round(st.gain)} m</div></div>`;
+    stats += `<div class="stat-box"><div class="sl">Dislivello −</div><div class="sv">−${Math.round(st.loss)} m</div></div>`;
+    stats += `<div class="stat-box"><div class="sl">Quota min / max</div><div class="sv">${Math.round(st.min)} / ${Math.round(st.max)} m</div></div>`;
+  } else {
+    stats += `<div class="stat-box"><div class="sl">Dislivello</div><div class="sv">n/d</div></div>`;
+    stats += `<div class="stat-box"><div class="sl">Quota min / max</div><div class="sv">n/d</div></div>`;
+  }
+  document.getElementById('tdStats').innerHTML = stats;
+  document.getElementById('tdChart').innerHTML = buildElevChart(tr.points);
+  document.getElementById('tdActs').innerHTML =
+    `<button class="pri" id="tdShow">Vedi su mappa</button>
+     <button id="tdGpx">Esporta GPX</button>
+     <button id="tdDel" style="color:var(--danger)">Elimina</button>`;
+  document.getElementById('trDetail').classList.add('open');
+  document.getElementById('tdShow').onclick = () => {
+    tr.visible = true;
+    drawSavedTrack(tr);
+    persistTracks();
+    switchView('map');
+    closeTrackDetail();
+    const ll = tr.points.map(p => [p.lat, p.lng]);
+    if (ll.length) map.fitBounds(ll, { padding: [50, 50] });
+  };
+  document.getElementById('tdGpx').onclick = () => exportGpx(tr);
+  document.getElementById('tdDel').onclick = () => {
+    if (confirm('Eliminare?')) {
+      removeTrackFromMap(tr.id);
+      savedTracks = savedTracks.filter(t => t.id !== tr.id);
+      persistTracks();
+      closeTrackDetail();
+      renderTracksList();
+    }
+  };
+}
+function closeTrackDetail() {
+  document.getElementById('trDetail').classList.remove('open');
+}
+
+
+function renderTracksList() {
+  loadTracks();
+  // ensure visible flag
+  savedTracks.forEach(t => { if (t.visible === undefined) t.visible = true; });
+  const list = document.getElementById('trList');
+  document.getElementById('trCount').textContent = savedTracks.length + (savedTracks.length === 1 ? ' traccia' : ' tracce');
+  if (!savedTracks.length) {
+    list.innerHTML = '<div class="empty"><div class="big">📍</div><p>Nessuna traccia</p><p style="font-size:12px;margin-top:6px">Registra col pulsante ● oppure crea un percorso / carica GPX</p></div>';
+    return;
+  }
+  list.innerHTML = savedTracks.map(tr => {
+    const dist = trackDistance(tr.points);
+    const st = elevStats(tr.points);
+    const type = tr.type === 'route' ? 'Percorso' : (tr.type === 'gpx' ? 'GPX' : 'GPS');
+    const elevTxt = st.has
+      ? ` · ↑${Math.round(st.gain)}m ↓${Math.round(st.loss)}m`
+      : '';
+    const on = tr.visible !== false;
+    return `<div class="tr-card" data-id="${tr.id}">
+      <div class="top">
+        <div class="color-dot" style="background:${tr.color||'#3dcfb0'};pointer-events:none"></div>
+        <div class="cname">${esc(tr.name)}</div>
+        <button class="toggle ${on?'on':''}" data-a="tog" title="Mostra/nascondi"></button>
+      </div>
+      <div class="meta">${type} · ${tr.points.length} pt · ${(dist/1000).toFixed(2)} km${elevTxt}</div>
+      <div class="acts">
+        <button data-a="open">Dettagli</button>
+        <button data-a="map">Vai alla mappa</button>
+        <button data-a="gpx">GPX</button>
+        <button class="del" data-a="del">Elimina</button>
+      </div>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('.tr-card').forEach(card => {
+    const id = card.dataset.id;
+    const tr = savedTracks.find(t => t.id === id);
+    card.querySelectorAll('button').forEach(b => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        const a = b.dataset.a;
+        if (a === 'tog' && tr) {
+          tr.visible = !(tr.visible !== false);
+          b.classList.toggle('on', tr.visible);
+          if (tr.visible) drawSavedTrack(tr);
+          else removeTrackFromMap(id);
+          persistTracks();
+        } else if (a === 'open' && tr) {
+          openTrackDetail(tr);
+        } else if (a === 'map' && tr) {
+          tr.visible = true;
+          drawSavedTrack(tr);
+          persistTracks();
+          switchView('map');
+          const ll = tr.points.map(p => [p.lat, p.lng]);
+          if (ll.length) map.fitBounds(ll, { padding: [50, 50] });
+        } else if (a === 'gpx' && tr) {
+          exportGpx(tr);
+        } else if (a === 'del') {
+          if (confirm('Eliminare questa traccia?')) {
+            removeTrackFromMap(id);
+            savedTracks = savedTracks.filter(t => t.id !== id);
+            persistTracks();
+            renderTracksList();
+          }
+        }
+      };
+    });
+    card.onclick = () => { if (tr) openTrackDetail(tr); };
+  });
+}
+
+
+(tr) {
+  let gpx = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Grotte CSR" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk>
+    <name>${esc(tr.name)}</name>
+    <trkseg>
+`;
+  tr.points.forEach(p => {
+    gpx += `      <trkpt lat="${p.lat}" lon="${p.lng}">`;
+    if (p.ele != null && !isNaN(p.ele)) gpx += `\n        <ele>${p.ele.toFixed(1)}</ele>`;
+    gpx += `</trkpt>\n`;
+  });
+  gpx += `    </trkseg>
+  </trk>
+</gpx>`;
+  const blob = new Blob([gpx], { type: 'application/gpx+xml' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = (tr.name || 'traccia').replace(/[^\w\-]+/g, '_') + '.gpx';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+
+function exportGpx(tr) {
+  let gpx = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Grotte CSR" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk>
+    <name>${esc(tr.name)}</name>
+    <trkseg>
+`;
+  tr.points.forEach(p => {
+    gpx += `      <trkpt lat="${p.lat}" lon="${p.lng}">`;
+    if (p.ele != null && !isNaN(p.ele)) gpx += `
+        <ele>${Number(p.ele).toFixed(1)}</ele>`;
+    gpx += `</trkpt>
+`;
+  });
+  gpx += `    </trkseg>
+  </trk>
+</gpx>`;
+  const blob = new Blob([gpx], { type: 'application/gpx+xml' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = (tr.name || 'traccia').replace(/[^\w\-]+/g, '_') + '.gpx';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function importGpx(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const text = reader.result;
+      const pts = [];
+      // Match full trkpt/rtept blocks to get lat, lon, ele
+      const blockRe = /<(trkpt|rtept|wpt)([^>]*)>([\s\S]*?)<\/\1>/gi;
+      let m;
+      while ((m = blockRe.exec(text))) {
+        const attrs = m[2], body = m[3];
+        let lat = attrs.match(/\blat=["']([^"']+)["']/i);
+        let lon = attrs.match(/\blon=["']([^"']+)["']/i);
+        if (!lat || !lon) continue;
+        let ele = null;
+        const em = body.match(/<ele>\s*([\-0-9.]+)\s*<\/ele>/i);
+        if (em) ele = parseFloat(em[1]);
+        pts.push({ lat: parseFloat(lat[1]), lng: parseFloat(lon[1]), ele });
+      }
+      // self-closing trkpt
+      if (!pts.length) {
+        const re = /<(?:trkpt|rtept|wpt)[^>]*\blat=["']([^"']+)["'][^>]*\blon=["']([^"']+)["'][^>]*\/?>/gi;
+        while ((m = re.exec(text))) {
+          pts.push({ lat: parseFloat(m[1]), lng: parseFloat(m[2]), ele: null });
+        }
+      }
+      if (pts.length < 2) {
+        alert('Nessun punto trovato nel GPX');
+        return;
+      }
+      let nameMatch = text.match(/<name>\s*([^<]+)\s*<\/name>/i);
+      const name = (nameMatch ? nameMatch[1] : (file.name || 'Import GPX')).replace(/\.gpx$/i, '');
+      const tr = {
+        id: 'g' + Date.now(),
+        name,
+        color: activeColor,
+        type: 'gpx',
+        points: pts,
+        visible: true,
+        created: Date.now()
+      };
+      savedTracks.unshift(tr);
+      persistTracks();
+      drawSavedTrack(tr);
+      renderTracksList();
+      switchView('map');
+      map.fitBounds(pts.map(p => [p.lat, p.lng]), { padding: [40, 40] });
+      status('GPX importato: ' + pts.length + ' punti');
+    } catch (e) {
+      alert('Errore lettura GPX');
+      console.error(e);
+    }
+  };
+  reader.readAsText(file);
+}
+
+function initTrackingUI() {
+  loadTracks();
+  savedTracks.forEach(tr => { if (tr.visible !== false) drawSavedTrack(tr); });
+  renderTracksList();
+
+  document.getElementById('tdClose') && (document.getElementById('tdClose').onclick = closeTrackDetail);
+  document.getElementById('fabTrack').onclick = () => {
+    if (recording) {
+      stopRecording();
+    } else if (routeMode) {
+      // ignore
+    } else {
+      startRecording();
+    }
+  };
+  document.getElementById('btnStopTrack').onclick = () => {
+    if (routeMode) cancelRouteMode();
+    else stopRecording();
+  };
+  document.getElementById('btnSaveTrack').onclick = () => {
+    if (routeMode) saveRoute();
+    else saveRecording();
+  };
+  document.getElementById('btnNewRoute').onclick = startRouteMode;
+  document.getElementById('gpxInput').onchange = (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (f) importGpx(f);
+    e.target.value = '';
+  };
+  document.querySelectorAll('#colorPick .color-dot').forEach(dot => {
+    dot.onclick = () => {
+      document.querySelectorAll('#colorPick .color-dot').forEach(d => d.classList.remove('on'));
+      dot.classList.add('on');
+      activeColor = dot.dataset.c;
+    };
+  });
+
+  map.on('click', onMapClickRoute);
+
+  // enhance locate button: start GPS watch + center
+  const oldLocate = document.getElementById('locateBtn').onclick;
+  document.getElementById('locateBtn').onclick = () => {
+    startGpsWatch();
+    map.locate({ setView: true, maxZoom: 16 });
+  };
+}
+
+
 async function init(){
   initMap();
   await openDB();
@@ -343,5 +1007,6 @@ async function init(){
 
   if('serviceWorker' in navigator){try{await navigator.serviceWorker.register('sw.js');}catch(e){}}
   renderFavs();
+  initTrackingUI();
 }
 init();
