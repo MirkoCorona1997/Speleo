@@ -1,21 +1,20 @@
-const CACHE_NAME = 'csr-grotte-v4';
-const ASSETS = [
-  './',
-  './index.html',
-  './app.js',
-  './manifest.json',
-  './grotte_sardegna.geojson',
-  './icon-192.png',
-  './icon-512.png'
-];
+const CACHE_NAME = 'csr-grotte-v41';
 
-self.addEventListener('install', event => {
+self.addEventListener('install', e => {
   self.skipWaiting();
-  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS)));
+  e.waitUntil(
+    caches.open(CACHE_NAME).then(c => c.addAll([
+      './',
+      './index.html',
+      './app.js',
+      './manifest.json',
+      './grotte_sardegna.geojson'
+    ]))
+  );
 });
 
-self.addEventListener('activate', event => {
-  event.waitUntil(
+self.addEventListener('activate', e => {
+  e.waitUntil(
     caches.keys().then(keys =>
       Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
     ).then(() => self.clients.claim())
@@ -25,34 +24,19 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
 
-  // Always network-first for app shell so updates show up
-  if (url.pathname.endsWith('.html') || url.pathname.endsWith('.js') || url.pathname.endsWith('/') || url.pathname.endsWith('manifest.json')) {
-    event.respondWith(
-      fetch(event.request).then(response => {
-        if (response && response.status === 200) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
-        }
-        return response;
-      }).catch(() => caches.match(event.request))
-    );
-    return;
+  // Don't intercept CDN / external (Leaflet, OSM tiles, proxies)
+  if (url.origin !== self.location.origin) {
+    return; // browser default
   }
 
-  if (url.hostname.includes('tile.openstreetmap.org')) {
-    event.respondWith(fetch(event.request).catch(() => caches.match(event.request)));
-    return;
-  }
-
+  // App files: network first, fallback cache
   event.respondWith(
-    caches.match(event.request).then(cached => {
-      return cached || fetch(event.request).then(response => {
-        if (response && response.status === 200 && event.request.method === 'GET') {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
-        }
-        return response;
-      }).catch(() => cached);
-    })
+    fetch(event.request).then(res => {
+      if (res && res.status === 200) {
+        const clone = res.clone();
+        caches.open(CACHE_NAME).then(c => c.put(event.request, clone));
+      }
+      return res;
+    }).catch(() => caches.match(event.request))
   );
 });

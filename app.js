@@ -189,7 +189,10 @@ function switchView(n){
 }
 
 function initMap(){
-  map=L.map('map',{zoomControl:false,attributionControl:false,tap:true,tapTolerance:25}).setView([40.05,9.0],8);
+  if(typeof L==='undefined'){showError('Leaflet non caricato. Controlla la connessione e ricarica.');return;}
+  map=L.map('map',{zoomControl:false,attributionControl:false}).setView([40.05,9.0],8);
+  setTimeout(()=>{try{map.invalidateSize();}catch(e){}},200);
+  setTimeout(()=>{try{map.invalidateSize();}catch(e){}},600);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18}).addTo(map);
   L.control.zoom({position:'bottomright'}).addTo(map);
   layer=L.layerGroup().addTo(map);
@@ -288,6 +291,13 @@ function status(m){
   setTimeout(()=>{if(el.textContent===m) el.textContent=all.length+' grotte';},2200);
 }
 function deb(fn,ms){let t;return()=>{clearTimeout(t);t=setTimeout(fn,ms);};}
+function showError(msg){
+  const el=document.getElementById('errbox');
+  if(!el) return;
+  el.textContent=msg;
+  el.classList.add('show');
+  setTimeout(()=>el.classList.remove('show'),8000);
+}
 
 async function init(){
   initMap();
@@ -312,7 +322,7 @@ async function init(){
     all=g.features||[];
     draw(all);
     status(all.length+' grotte');
-  }catch(e){status('Errore dati');console.error(e);}
+  }catch(e){status('Errore dati');showError('Impossibile caricare le grotte: '+e.message);console.error(e);}
 
   if('serviceWorker' in navigator){try{await navigator.serviceWorker.register('sw.js');}catch(e){}}
   renderFavs();
