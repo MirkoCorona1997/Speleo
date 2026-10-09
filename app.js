@@ -396,6 +396,13 @@ function showNavPin(latlng){
   document.getElementById('navPinGoogle').href=`https://www.google.com/maps/dir/?api=1&destination=${la},${lo}&travelmode=driving`;
     document.getElementById('navPin').classList.add('show');
 }
+window.appRouteFromPin = function(){
+  const ll = window._pinLL;
+  if (!ll) { status('Tieni premuto un punto sulla mappa'); return; }
+  hideNavPin();
+  startRouteMode();
+  onMapClickRoute({ latlng: ll });
+};
 function hideNavPin(){
   document.getElementById('navPin').classList.remove('show');
   if(navMarker){map.removeLayer(navMarker);navMarker=null;}
@@ -1035,7 +1042,7 @@ function buildElevChart(pts) {
   d += 'L' + lx.toFixed(1) + ',' + ly.toFixed(1) + ' ';
   const area = d + `L${W-pad},${H-pad} L${pad},${H-pad} Z`;
   return `<div class="elev-chart">
-    <div id="elevRead" class="clabel" style="text-align:left;margin-bottom:6px">0 m · ${Math.round(prof[0].ele)} m</div>
+    <div id="elevRead" class="clabel" style="text-align:left;margin-bottom:6px">Distanza 0 m · quota ${Math.round(prof[0].ele)} m</div>
     <div id="elevScroll" style="overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:8px">
       <svg id="elevSvg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
         <path d="${area}" fill="rgba(61,207,176,0.22)" stroke="none"/>
@@ -1056,7 +1063,7 @@ function bindElevScrub() {
     let best = prof[0];
     for (const p of prof) { if (p.d <= m) best = p; else break; }
     const read = document.getElementById('elevRead');
-    if (read) read.textContent = m + ' m · ' + (best.ele!=null ? Number(best.ele).toFixed(1) : '–') + ' m s.l.m.';
+    if (read) read.textContent = 'Distanza ' + m + ' m · quota ' + (best.ele!=null ? Number(best.ele).toFixed(1) : '–') + ' m';
     const svg = document.getElementById('elevSvg');
     const cur = document.getElementById('elevCursor');
     if (svg && cur && prof[prof.length-1].d) {

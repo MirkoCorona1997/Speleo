@@ -92,7 +92,7 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
 .nav-pin-info.show{display:block}
 #poiSheet.show{display:block}
 .nav-pin-info p{font-size:13px;color:var(--muted);margin-bottom:10px}
-.nav-pin-info .row{display:flex;gap:8px}
+.nav-pin-info .row{display:flex;gap:8px;flex-wrap:wrap}
 .nav-pin-info a,.nav-pin-info button{
   flex:1;height:42px;border-radius:12px;font-weight:700;font-size:13px;border:none;
   display:flex;align-items:center;justify-content:center;text-decoration:none;cursor:pointer;color:inherit;
@@ -282,7 +282,7 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
 </style>
 </head>
 <body>
-<div class="ver">v7.1</div>
+<div class="ver">v7.2</div>
 <div class="offline" id="offlineBadge">OFFLINE</div>
 <div class="errbox" id="errbox"></div>
 
@@ -397,6 +397,7 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
   <div class="row">
     <a class="ba" id="navPinGoogle" href="#" target="_blank">Google Maps</a>
     <button type="button" class="bb" id="navPinSave" onclick="window.appSavePoi && window.appSavePoi()">Salva punto</button>
+    <button type="button" class="bb" id="navPinRoute" onclick="window.appRouteFromPin && window.appRouteFromPin()">Traccia da qui</button>
     <button class="bb" id="navPinClose">✕</button>
   </div>
 </div>
