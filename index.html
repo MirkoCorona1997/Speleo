@@ -207,7 +207,7 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
   background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
   padding: 12px 14px; margin-bottom: 8px;
 }
-.tr-card .top { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.tr-card .tr-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; position: static; }
 .tr-card .cname { font-weight: 700; font-size: 14px; flex: 1; }
 .tr-card .meta { font-size: 11px; color: var(--muted); margin-bottom: 8px; }
 .tr-card .acts { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -282,7 +282,7 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
 </style>
 </head>
 <body>
-<div class="ver">v6.1</div>
+<div class="ver">v6.2</div>
 <div class="offline" id="offlineBadge">OFFLINE</div>
 <div class="errbox" id="errbox"></div>
 
@@ -322,6 +322,7 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
     <div class="row">
       <div class="info"><strong id="trackStat">—</strong><span id="trackSub">Traccia GPS</span></div>
       <button class="tbtn-sm rec" id="btnStopTrack">Stop</button>
+      <button class="tbtn-sm" id="btnCancelTrack">Annulla</button>
       <button class="tbtn-sm acc" id="btnSaveTrack">Salva</button>
     </div>
   </div>

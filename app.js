@@ -440,6 +440,7 @@ async function enableCompass() {
       if (s !== 'granted') return;
     }
     if (orientHandler) window.removeEventListener('deviceorientation', orientHandler, true);
+    window.addEventListener('deviceorientationabsolute', onOrient, true);
     window.addEventListener('deviceorientation', onOrient, true);
     orientHandler = onOrient;
   } catch (e) { console.warn(e); }
@@ -463,7 +464,7 @@ function startGpsWatch() {
       }
     },
     err => { console.warn(err); },
-    { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 }
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
   );
 }
 
@@ -508,10 +509,22 @@ function startRecording() {
   else map.locate({ setView: true, maxZoom: 16 });
 }
 
+function hideTrackBar() {
+  const bar = document.getElementById('trackBar');
+  if (bar) bar.classList.remove('show');
+}
 function stopRecording() {
   recording = false;
-  // keep bar until save or discard
-  document.getElementById('trackSub').textContent = recPoints.length + ' punti · fermata';
+  hideTrackBar();
+  status('Registrazione fermata');
+}
+function cancelRecording() {
+  recording = false;
+  recPoints = [];
+  recStart = null;
+  if (recPolyline) { map.removeLayer(recPolyline); recPolyline = null; }
+  hideTrackBar();
+  status('Traccia annullata');
 }
 
 async function saveRecording() {
@@ -569,7 +582,7 @@ function clearRouteDraft() {
   routeGeom = [];
 }
 
-const SNAP_MAX_M = 70;
+const SNAP_MAX_M = 10;
 let routeGeom = [];
 let routeBusy = false;
 
@@ -895,7 +908,7 @@ function renderTracksList() {
       : '';
     const on = tr.visible !== false;
     return `<div class="tr-card" data-id="${tr.id}">
-      <div class="top">
+      <div class="tr-head">
         <div class="color-dot" style="background:${tr.color||'#3dcfb0'};pointer-events:none"></div>
         <div class="cname">${esc(tr.name)}</div>
         <span style="font-size:11px;color:var(--muted)">Mappa</span>
@@ -1072,6 +1085,11 @@ function initTrackingUI() {
   document.getElementById('btnStopTrack').onclick = () => {
     if (routeMode) cancelRouteMode();
     else stopRecording();
+  };
+  const btnCancel = document.getElementById('btnCancelTrack');
+  if (btnCancel) btnCancel.onclick = () => {
+    if (routeMode) cancelRouteMode();
+    else cancelRecording();
   };
   document.getElementById('btnSaveTrack').onclick = () => {
     if (routeMode) saveRoute();
