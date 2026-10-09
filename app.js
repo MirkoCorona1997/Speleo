@@ -176,7 +176,6 @@ async function renderFavs(){
     <div class="bt">
       <button data-a="map">🗺️</button>
       <button data-a="nav">🧭</button>
-      ${it.scheda_url?'<button data-a="scheda">📄</button>':''}
       <button class="del" data-a="del">🗑️</button>
     </div>
   </div>`).join('');
@@ -196,10 +195,61 @@ async function renderFavs(){
         }else if(a==='nav'&&it?.coordinates){
           const [lo,la]=it.coordinates;
           location.href=`https://www.google.com/maps/dir/?api=1&destination=${la},${lo}&travelmode=driving`;
-        }else if(a==='scheda'&&it?.scheda_url){
-          location.href=it.scheda_url;
         }
       };
+    });
+  });
+}
+
+
+function loadExplored(){
+  try { return JSON.parse(localStorage.getItem('csr-esplorate')||'[]'); } catch(e){ return []; }
+}
+function saveExplored(list){ localStorage.setItem('csr-esplorate', JSON.stringify(list)); }
+function isExplored(id){ return loadExplored().some(x => x.id_ost === id); }
+function toggleExplored(f){
+  const p = f.properties;
+  let list = loadExplored();
+  if (list.some(x => x.id_ost === p.id_ost)) list = list.filter(x => x.id_ost !== p.id_ost);
+  else list.unshift({ id_ost: p.id_ost, nome: p.nome||p.nome_reale, codice: p.codice, comune: p.comune, provincia: p.provincia, coordinates: f.geometry.coordinates, when: Date.now() });
+  saveExplored(list);
+  const b = document.getElementById('expBtn');
+  if (b) b.textContent = isExplored(p.id_ost) ? '✓  Esplorata' : '○  Segna esplorata';
+  status(isExplored(p.id_ost) ? 'Segnata come esplorata' : 'Spunta tolta');
+}
+function renderExplored(){
+  const listEl = document.getElementById('expList');
+  if (!listEl) return;
+  const items = loadExplored();
+  document.getElementById('expCount').textContent = items.length + (items.length===1?' esplorata':' esplorate');
+  if (!items.length) {
+    listEl.innerHTML = '<div class="empty"><div class="big">✓</div><p>Nessuna grotta esplorata</p><p style="font-size:12px;margin-top:6px">Apri una grotta e metti la spunta</p></div>';
+    return;
+  }
+  listEl.innerHTML = items.map(it => `<div class="fc" data-id="${it.id_ost}">
+    <div class="inf">
+      <div class="n">${esc(it.nome||'Grotta')}</div>
+      <div class="m">${esc([it.comune,it.provincia].filter(Boolean).join(' · '))}</div>
+      <div class="id">${it.codice?('N. '+esc(padCat(it.codice))):('ID '+esc(it.id_ost))}</div>
+    </div>
+    <div class="bt">
+      <button data-a="map">🗺️</button>
+      <button class="del" data-a="del">✕</button>
+    </div>
+  </div>`).join('');
+  listEl.querySelectorAll('.fc').forEach(card => {
+    const it = items.find(x => x.id_ost === card.dataset.id);
+    card.querySelectorAll('button').forEach(b => b.onclick = (e) => {
+      e.stopPropagation();
+      if (b.dataset.a === 'del') {
+        saveExplored(loadExplored().filter(x => x.id_ost !== it.id_ost));
+        renderExplored();
+      } else if (b.dataset.a === 'map' && it.coordinates) {
+        switchView('map');
+        map.setView([it.coordinates[1], it.coordinates[0]], 15);
+        const f = all.find(x => x.properties.id_ost === it.id_ost);
+        if (f) openCard(f);
+      }
     });
   });
 }
@@ -210,6 +260,7 @@ function switchView(n){
   document.getElementById('view-'+n).classList.add('active');
   document.querySelector(`.tab[data-view="${n}"]`).classList.add('on');
   if(n==='preferiti') renderFavs();
+  if(n==='esplorate') renderExplored();
   if(n==='tracce') renderTracksList();
   if(n==='punti') renderPoiList();
   if(n==='map'&&map) setTimeout(()=>map.invalidateSize(),40);
@@ -464,9 +515,11 @@ function openCard(f){
   document.getElementById('cardActions').innerHTML =
     docs +
     `<a class="bb" href="https://www.google.com/maps/dir/?api=1&destination=${la},${lo}&travelmode=driving" target="_blank" rel="noopener">Google Maps</a>` +
+    `<button class="bc" id="expBtn">${isExplored(p.id_ost) ? '✓  Esplorata' : '○  Segna esplorata'}</button>` +
     `<button class="bc" id="saveBtn">★  Salva offline</button>`;
   document.getElementById('card').classList.add('open');
   document.getElementById('saveBtn')?.addEventListener('click',()=>saveFav(f));
+  document.getElementById('expBtn')?.addEventListener('click',()=>toggleExplored(f));
 
   // Resolve real name online (async) — then card updates + available for offline save
   resolveNome(f);

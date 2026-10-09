@@ -135,9 +135,9 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
 .tab.on{color:var(--accent)}
 .tab .i{font-size:20px}
 
-#view-preferiti{background:var(--bg);overflow-y:auto;-webkit-overflow-scrolling:touch;padding:max(16px,var(--safe-t)) 14px 20px;z-index:2}
-#view-preferiti h1{font-size:24px;font-weight:800;margin-bottom:2px}
-#view-preferiti .sub{color:var(--muted);font-size:13px;margin-bottom:18px}
+#view-preferiti, #view-esplorate{background:var(--bg);overflow-y:auto;-webkit-overflow-scrolling:touch;padding:max(16px,var(--safe-t)) 14px 20px;z-index:2}
+#view-preferiti h1, #view-esplorate h1{font-size:24px;font-weight:800;margin-bottom:2px}
+#view-preferiti .sub, #view-esplorate .sub{color:var(--muted);font-size:13px;margin-bottom:18px}
 .empty{text-align:center;padding:48px 20px;color:var(--muted)}
 .empty .big{font-size:40px;opacity:.4;margin-bottom:10px}
 .fc{
@@ -282,7 +282,7 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
 </style>
 </head>
 <body>
-<div class="ver">v7.4</div>
+<div class="ver">v7.5</div>
 <div class="offline" id="offlineBadge">OFFLINE</div>
 <div class="errbox" id="errbox"></div>
 
@@ -379,6 +379,11 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
   <p class="sub" id="favCount">0 salvate</p>
   <div id="favList"></div>
 </div>
+<div class="view" id="view-esplorate">
+  <h1>Esplorate</h1>
+  <p class="sub" id="expCount">0 esplorate</p>
+  <div id="expList"></div>
+</div>
 
 <div class="card" id="card">
   <div class="card-top">
@@ -430,6 +435,7 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
   <button class="tab" data-view="tracce"><span class="i">📍</span>Tracce</button>
   <button class="tab" data-view="punti"><span class="i">📌</span>Punti</button>
   <button class="tab" data-view="preferiti"><span class="i">★</span>Preferiti</button>
+  <button class="tab" data-view="esplorate"><span class="i">✓</span>Esplorate</button>
 </nav>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
