@@ -1,5 +1,5 @@
 {
-  "name": "CSR Sardegna – Grotte",
+  "name": "Grotte CSR Sardegna",
   "short_name": "Grotte CSR",
   "description": "Mappa delle grotte del Catasto Speleologico Regionale della Sardegna con salvataggio offline",
   "start_url": "./index.html",
@@ -20,5 +20,6 @@
       "type": "image/png",
       "purpose": "any maskable"
     }
-  ]
+  ],
+  "version": "4.0"
 }
