@@ -1379,35 +1379,31 @@ function initTrackingUI() {
   document.getElementById('tdClose') && (document.getElementById('tdClose').onclick = closeTrackDetail);
   window.appCloseDetail = closeTrackDetail;
   
+  function setBase(mode) {
+    [baseOsm, baseTopo, baseSat].forEach(l => { try { map.removeLayer(l); } catch(e){} });
+    baseMode = mode;
+    const btnTopo = document.getElementById('btnTopo');
+    const btnSat = document.getElementById('btnSat');
+    if (btnTopo) btnTopo.classList.toggle('on', mode === 'topo');
+    if (btnSat) btnSat.classList.toggle('on', mode === 'sat');
+    if (mode === 'topo') {
+      baseTopo.addTo(map);
+      status('Mappa topografica');
+    } else if (mode === 'sat') {
+      baseSat.addTo(map);
+      status('Vista satellitare');
+    } else {
+      baseOsm.addTo(map);
+      status('Mappa OpenStreetMap');
+    }
+  }
   const btnTopo = document.getElementById('btnTopo');
   if (btnTopo) {
-    const setBase = (mode) => {
-      [baseOsm, baseTopo, baseSat].forEach(l => { try { map.removeLayer(l); } catch(e){} });
-      baseMode = mode;
-      if (mode === 'topo') {
-        baseTopo.addTo(map);
-        btnTopo.classList.add('on');
-        btnTopo.title = 'Livello: topografica → satellitare';
-        btnTopo.textContent = '⛰';
-        status('Mappa topografica');
-      } else if (mode === 'sat') {
-        baseSat.addTo(map);
-        btnTopo.classList.add('on');
-        btnTopo.title = 'Livello: satellitare → OpenStreetMap';
-        btnTopo.textContent = '🛰';
-        status('Vista satellitare');
-      } else {
-        baseOsm.addTo(map);
-        btnTopo.classList.remove('on');
-        btnTopo.title = 'Livello: OpenStreetMap → topografica';
-        btnTopo.textContent = '🗺';
-        status('Mappa OpenStreetMap');
-      }
-    };
-    btnTopo.onclick = () => {
-      const next = baseMode === 'osm' ? 'topo' : baseMode === 'topo' ? 'sat' : 'osm';
-      setBase(next);
-    };
+    btnTopo.onclick = () => setBase(baseMode === 'topo' ? 'osm' : 'topo');
+  }
+  const btnSat = document.getElementById('btnSat');
+  if (btnSat) {
+    btnSat.onclick = () => setBase(baseMode === 'sat' ? 'osm' : 'sat');
   }
 
   const btnStartRec = document.getElementById('btnStartRec');
