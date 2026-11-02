@@ -277,6 +277,10 @@ function initMap(){
     maxZoom:17,
     attribution:'© OpenTopoMap (CC-BY-SA)'
   });
+  baseSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{
+    maxZoom:19,
+    attribution:'© Esri'
+  });
   baseOsm.addTo(map);
   L.control.zoom({position:'bottomright'}).addTo(map);
   layer=L.layerGroup().addTo(map);
@@ -566,7 +570,7 @@ function showError(msg){
 /* ========== GPS + Tracce GPX ========== */
 const STORE_TR = 'tracce';
 const TRACK_COLORS = ['#3dcfb0','#3b9eff','#f5b942','#e85d5d','#c084fc','#fb923c'];
-let baseOsm, baseTopo, topoOn = false;
+let baseOsm, baseTopo, baseSat, baseMode = 'osm'; // osm | topo | sat
 let watchId = null;
 let orientHandler = null;
 let myMarker = null, myArrow = null;
@@ -1377,18 +1381,32 @@ function initTrackingUI() {
   
   const btnTopo = document.getElementById('btnTopo');
   if (btnTopo) {
-    btnTopo.onclick = () => {
-      topoOn = !topoOn;
-      btnTopo.classList.toggle('on', topoOn);
-      if (topoOn) {
-        map.removeLayer(baseOsm);
+    const setBase = (mode) => {
+      [baseOsm, baseTopo, baseSat].forEach(l => { try { map.removeLayer(l); } catch(e){} });
+      baseMode = mode;
+      if (mode === 'topo') {
         baseTopo.addTo(map);
-        status('Mappa topografica (OpenTopoMap)');
+        btnTopo.classList.add('on');
+        btnTopo.title = 'Livello: topografica → satellitare';
+        btnTopo.textContent = '⛰';
+        status('Mappa topografica');
+      } else if (mode === 'sat') {
+        baseSat.addTo(map);
+        btnTopo.classList.add('on');
+        btnTopo.title = 'Livello: satellitare → OpenStreetMap';
+        btnTopo.textContent = '🛰';
+        status('Vista satellitare');
       } else {
-        map.removeLayer(baseTopo);
         baseOsm.addTo(map);
+        btnTopo.classList.remove('on');
+        btnTopo.title = 'Livello: OpenStreetMap → topografica';
+        btnTopo.textContent = '🗺';
         status('Mappa OpenStreetMap');
       }
+    };
+    btnTopo.onclick = () => {
+      const next = baseMode === 'osm' ? 'topo' : baseMode === 'topo' ? 'sat' : 'osm';
+      setBase(next);
     };
   }
 
