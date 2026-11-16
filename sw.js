@@ -1,6 +1,6 @@
-const CACHE_NAME = 'csr-grotte-v87';
-const TILE_CACHE = 'csr-tiles-v87';
-const DOC_CACHE = 'csr-docs-v87';
+const CACHE_NAME = 'csr-grotte-v88';
+const TILE_CACHE = 'csr-tiles-v88';
+const DOC_CACHE = 'csr-docs-v88';
 const APP_ASSETS = [
   './',
   './index.html',
@@ -72,21 +72,37 @@ self.addEventListener('fetch', event => {
   if (url.hostname.includes('catastospeleologicoregionale.sardegna.it')) {
     event.respondWith((async () => {
       const cache = await caches.open(DOC_CACHE);
+      const matchOpts = { ignoreSearch: true, ignoreVary: true, ignoreMethod: false };
+      const findCached = async () =>
+        (await cache.match(req, matchOpts)) ||
+        (await cache.match(url.href, matchOpts)) ||
+        (await cache.match(url.origin + url.pathname, matchOpts));
+
+      // Offline: only cache
+      if (!self.navigator.onLine) {
+        const cached = await findCached();
+        if (cached) return cached;
+        return new Response(
+          '<!DOCTYPE html><html><body style="font-family:sans-serif;padding:24px;background:#111;color:#eee"><h3>Documento non in cache</h3><p>Apri questo documento almeno una volta con connessione, poi riprova offline.</p></body></html>',
+          { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+        );
+      }
+
       try {
-        const res = await fetch(req, { redirect: 'follow' });
-        // Cache real pages/PDFs (not tiny challenge pages if we can tell)
+        const res = await fetch(req, { redirect: 'follow', credentials: 'omit' });
         if (res && (res.ok || res.type === 'opaque')) {
           try { await cache.put(req, res.clone()); } catch (e) {}
           try { await cache.put(url.href, res.clone()); } catch (e) {}
+          try { await cache.put(url.origin + url.pathname, res.clone()); } catch (e) {}
         }
         return res;
       } catch (e) {
-        const cached = await cache.match(req) || await cache.match(url.href) || await cache.match(url.origin + url.pathname);
+        const cached = await findCached();
         if (cached) return cached;
-        return new Response('Documento non disponibile offline. Aprilo una volta con connessione.', {
-          status: 503,
-          headers: { 'Content-Type': 'text/plain; charset=utf-8' }
-        });
+        return new Response(
+          '<!DOCTYPE html><html><body style="font-family:sans-serif;padding:24px;background:#111;color:#eee"><h3>Documento non disponibile offline</h3><p>Apri questo documento online almeno una volta.</p></body></html>',
+          { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+        );
       }
     })());
     return;

@@ -588,7 +588,11 @@ function draw(feats){
 
 
 
-const DOC_CACHE_NAME = 'csr-docs-v87';
+
+const DOC_CACHE_NAME = 'csr-docs-v88';
+let docZoom = 1;
+let docPinch = null;
+
 function csrDocUrls(codice) {
   const c = padCat(codice);
   if (!c) return [];
@@ -601,24 +605,42 @@ function csrDocUrls(codice) {
 async function isDocCached(url) {
   try {
     const cache = await caches.open(DOC_CACHE_NAME);
-    return !!(await cache.match(url) || await cache.match(new Request(url)));
+    const opts = { ignoreSearch: true, ignoreVary: true };
+    return !!(await cache.match(url, opts) || await cache.match(new Request(url), opts));
   } catch (e) { return false; }
 }
-/** Warm cache by loading the real page in a hidden iframe (works past CSR protection). */
-function warmDocInIframe(url, timeoutMs = 8000) {
+function applyDocZoom() {
+  const wrap = document.getElementById('docZoomWrap');
+  const frame = document.getElementById('docFrame');
+  if (!wrap || !frame) return;
+  docZoom = Math.max(1, Math.min(4, docZoom));
+  wrap.style.transform = docZoom === 1 ? 'none' : `scale(${docZoom})`;
+  wrap.style.width = docZoom === 1 ? '100%' : `${100 / docZoom}%`;
+  // Fit full page width first: iframe full viewport height at zoom 1
+  frame.style.width = '100%';
+  frame.style.height = (window.innerHeight * 0.85 * Math.max(docZoom, 1)) + 'px';
+  if (docZoom === 1) {
+    frame.style.height = 'calc(100vh - 60px)';
+    frame.style.minHeight = 'calc(100vh - 60px)';
+  }
+}
+function warmDocInIframe(url, timeoutMs = 10000) {
   return new Promise(resolve => {
     const iframe = document.createElement('iframe');
-    iframe.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;left:-100px;top:-100px';
-    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms');
+    iframe.style.cssText = 'position:fixed;width:2px;height:2px;opacity:0.01;pointer-events:none;left:0;top:0;z-index:-1';
     let done = false;
-    const finish = (ok) => {
+    const finish = async (ok) => {
       if (done) return;
       done = true;
       clearTimeout(t);
+      try {
+        const cache = await caches.open(DOC_CACHE_NAME);
+        await cache.add(url).catch(() => null);
+      } catch (e) {}
       try { iframe.remove(); } catch (e) {}
       resolve(ok);
     };
-    const t = setTimeout(() => finish(true), timeoutMs); // assume SW got something
+    const t = setTimeout(() => finish(true), timeoutMs);
     iframe.onload = () => finish(true);
     iframe.onerror = () => finish(false);
     iframe.src = url;
@@ -631,34 +653,83 @@ async function cacheCaveDocs(codice) {
   let ok = 0;
   for (const d of list) {
     try {
-      await warmDocInIframe(d.url, 9000);
-      // also try explicit fetch so SW stores it
-      try { await fetch(d.url, { mode: 'no-cors', credentials: 'omit' }); } catch (e) {}
-      if (await isDocCached(d.url)) ok++;
-      else ok++; // iframe load often enough even if match is tricky
+      await warmDocInIframe(d.url, 12000);
+      ok++;
     } catch (e) {}
   }
   return { ok, total: list.length };
 }
-function openCsrDoc(url, title) {
+async function openCsrDoc(url, title) {
   const viewer = document.getElementById('docViewer');
   const frame = document.getElementById('docFrame');
-  const t = document.getElementById('docTitle');
+  const tEl = document.getElementById('docTitle');
   if (!viewer || !frame) {
     window.open(url, '_blank');
     return;
   }
-  if (t) t.textContent = title || 'Documento';
-  frame.src = url; // SW serves from cache offline
+  if (tEl) tEl.textContent = title || 'Documento';
+  docZoom = 1;
+  applyDocZoom();
   viewer.style.display = 'flex';
+
+  // Prefer network when online (and cache via SW); offline relies on SW cache
+  frame.src = 'about:blank';
+  setTimeout(() => {
+    frame.src = url;
+    applyDocZoom();
+  }, 30);
+
+  if (navigator.onLine) {
+    // Ensure SW/cache gets a copy after load
+    const onLoad = async () => {
+      frame.removeEventListener('load', onLoad);
+      try {
+        const cache = await caches.open(DOC_CACHE_NAME);
+        await cache.add(url).catch(() => null);
+      } catch (e) {}
+      applyDocZoom();
+    };
+    frame.addEventListener('load', onLoad);
+  } else {
+    const cached = await isDocCached(url);
+    if (!cached) status('Non in cache: aprilo online almeno una volta');
+  }
 }
 function closeDocViewer() {
   const viewer = document.getElementById('docViewer');
   const frame = document.getElementById('docFrame');
   if (frame) frame.src = 'about:blank';
   if (viewer) viewer.style.display = 'none';
+  docZoom = 1;
 }
 window.appCloseDoc = closeDocViewer;
+
+function initDocViewerUI() {
+  initDocViewerUI();
+  document.getElementById('docZoomIn')?.addEventListener('click', () => { docZoom += 0.25; applyDocZoom(); });
+  document.getElementById('docZoomOut')?.addEventListener('click', () => { docZoom -= 0.25; applyDocZoom(); });
+  document.getElementById('docZoomReset')?.addEventListener('click', () => { docZoom = 1; applyDocZoom(); });
+  const scroll = document.getElementById('docScroll');
+  if (scroll) {
+    scroll.addEventListener('touchstart', e => {
+      if (e.touches.length === 2) {
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        docPinch = { dist: Math.hypot(dx, dy), zoom: docZoom };
+      }
+    }, { passive: true });
+    scroll.addEventListener('touchmove', e => {
+      if (e.touches.length === 2 && docPinch) {
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        const dist = Math.hypot(dx, dy);
+        docZoom = docPinch.zoom * (dist / docPinch.dist);
+        applyDocZoom();
+      }
+    }, { passive: true });
+    scroll.addEventListener('touchend', () => { docPinch = null; }, { passive: true });
+  }
+}
 
 function openCard(f){
   hideNavPin();
@@ -1759,7 +1830,7 @@ async function init(){
   if(routeBtn) routeBtn.onclick=()=>startRouteMode();
   map.on('dragstart',closeCard);
   document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>switchView(t.dataset.view));
-  document.getElementById('docClose')?.addEventListener('click', closeDocViewer);
+  initDocViewerUI();
 
     try{
     let g = null;
