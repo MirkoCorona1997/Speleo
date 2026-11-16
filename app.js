@@ -29,29 +29,59 @@ function getNameCache(id){
 }
 
 function saveFav(f){
-  if(!db||!f.properties.id_ost) return;
+  if(!db||!f.properties.id_ost){ status('Impossibile salvare'); return; }
   const p=f.properties;
   const tx=db.transaction(STORE_FAV,'readwrite');
   tx.objectStore(STORE_FAV).put({
-    id_ost:p.id_ost,
+    id_ost:String(p.id_ost),
     nome:p.nome,
     nome_reale:p.nome_reale||p.nome,
     codice:p.codice||null,
     comune:p.comune,
     provincia:p.provincia,
+    localita:p.localita||null,
     ambito:p.ambito,
-    scheda_url:p.scheda_url,
+    tipologia:p.tipologia||null,
+    scheda_url:p.scheda_url||null,
     coordinates:f.geometry.coordinates,
     savedAt:Date.now()
   });
-  tx.oncomplete=()=>{status('Salvata offline ★');renderFavs();};
+  tx.oncomplete=()=>{ favIds.add(String(p.id_ost)); status('Salvata offline ★'); renderFavs(); };
+  tx.onerror=()=>status('Errore salvataggio');
 }
 function delFav(id){
   if(!db) return;
   const tx=db.transaction(STORE_FAV,'readwrite');
   tx.objectStore(STORE_FAV).delete(id);
-  tx.oncomplete=()=>{status('Rimossa');renderFavs();};
+  tx.oncomplete=()=>{ favIds.delete(String(id)); status('Rimossa'); renderFavs(); };
 }
+
+function favToFeature(it){
+  const fromAll = all.find(x => String(x.properties.id_ost) === String(it.id_ost));
+  if (fromAll) {
+    const p = fromAll.properties;
+    if (it.nome) { p.nome = it.nome; p.nome_reale = it.nome_reale || it.nome; }
+    if (it.codice) p.codice = it.codice;
+    return fromAll;
+  }
+  return {
+    type: 'Feature',
+    geometry: { type: 'Point', coordinates: it.coordinates },
+    properties: {
+      id_ost: String(it.id_ost),
+      nome: it.nome,
+      nome_reale: it.nome_reale || it.nome,
+      codice: it.codice || null,
+      comune: it.comune,
+      provincia: it.provincia,
+      localita: it.localita || null,
+      ambito: it.ambito,
+      tipologia: it.tipologia || null,
+      scheda_url: it.scheda_url || null
+    }
+  };
+}
+
 function allFavs(){
   return new Promise(r=>{
     if(!db) return r([]);
@@ -59,6 +89,54 @@ function allFavs(){
     const q=tx.objectStore(STORE_FAV).getAll();
     q.onsuccess=()=>r(q.result||[]);
   });
+}
+let favIds = new Set();
+async function refreshFavIds(){
+  const items = await allFavs();
+  favIds = new Set(items.map(x => String(x.id_ost)));
+}
+function isFav(id){ return favIds.has(String(id)); }
+async function toggleFav(f){
+  if(!db || !f.properties.id_ost){ status('Impossibile salvare'); return; }
+  const id = String(f.properties.id_ost);
+  if (isFav(id)) {
+    await new Promise(ok => {
+      const tx = db.transaction(STORE_FAV,'readwrite');
+      tx.objectStore(STORE_FAV).delete(id);
+      // also try original key type
+      try { tx.objectStore(STORE_FAV).delete(f.properties.id_ost); } catch(e){}
+      tx.oncomplete = ok;
+      tx.onerror = ok;
+    });
+    favIds.delete(id);
+    status('Rimossa dai preferiti');
+  } else {
+    await new Promise((ok, no) => {
+      const p = f.properties;
+      const tx = db.transaction(STORE_FAV,'readwrite');
+      tx.objectStore(STORE_FAV).put({
+        id_ost: id,
+        nome: p.nome,
+        nome_reale: p.nome_reale || p.nome,
+        codice: p.codice || null,
+        comune: p.comune,
+        provincia: p.provincia,
+        localita: p.localita || null,
+        ambito: p.ambito,
+        tipologia: p.tipologia || null,
+        scheda_url: p.scheda_url || null,
+        coordinates: f.geometry.coordinates,
+        savedAt: Date.now()
+      });
+      tx.oncomplete = ok;
+      tx.onerror = () => no(tx.error);
+    });
+    favIds.add(id);
+    status('Salvata offline ★');
+  }
+  const b = document.getElementById('saveBtn');
+  if (b) b.textContent = isFav(id) ? '★  Salvata offline' : '○  Salva offline';
+  renderFavs();
 }
 
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
@@ -190,8 +268,7 @@ async function renderFavs(){
         else if(a==='map'&&it?.coordinates){
           switchView('map');
           map.setView([it.coordinates[1],it.coordinates[0]],15);
-          const f=all.find(x=>x.properties.id_ost===id);
-          if(f){ if(it.nome) {f.properties.nome=it.nome;f.properties.nome_reale=it.nome_reale||it.nome;f.properties.codice=it.codice;} openCard(f); }
+          openCard(favToFeature(it));
         }else if(a==='nav'&&it?.coordinates){
           const [lo,la]=it.coordinates;
           location.href=`https://www.google.com/maps/dir/?api=1&destination=${la},${lo}&travelmode=driving`;
@@ -247,8 +324,7 @@ function renderExplored(){
       } else if (b.dataset.a === 'map' && it.coordinates) {
         switchView('map');
         map.setView([it.coordinates[1], it.coordinates[0]], 15);
-        const f = all.find(x => x.properties.id_ost === it.id_ost);
-        if (f) openCard(f);
+        openCard(favToFeature(it));
       }
     });
   });
@@ -520,10 +596,17 @@ function openCard(f){
     docs +
     `<a class="bb" href="https://www.google.com/maps/dir/?api=1&destination=${la},${lo}&travelmode=driving" target="_blank" rel="noopener">Google Maps</a>` +
     `<button class="bc" id="expBtn">${isExplored(p.id_ost) ? '✓  Esplorata' : '○  Segna esplorata'}</button>` +
-    `<button class="bc" id="saveBtn">★  Salva offline</button>`;
+    `<button class="bc" id="saveBtn">${isFav(p.id_ost) ? '★  Salvata offline' : '○  Salva offline'}</button>`;
   document.getElementById('card').classList.add('open');
-  document.getElementById('saveBtn')?.addEventListener('click',()=>saveFav(f));
+  document.getElementById('saveBtn')?.addEventListener('click',()=>toggleFav(f));
   document.getElementById('expBtn')?.addEventListener('click',()=>toggleExplored(f));
+  // refresh state if favIds not yet loaded
+  refreshFavIds().then(() => {
+    const b = document.getElementById('saveBtn');
+    if (b && cur && cur.properties && String(cur.properties.id_ost) === String(p.id_ost)) {
+      b.textContent = isFav(p.id_ost) ? '★  Salvata offline' : '○  Salva offline';
+    }
+  });
 
   // Resolve real name online (async) — then card updates + available for offline save
   resolveNome(f);
@@ -1568,24 +1651,38 @@ async function init(){
   map.on('dragstart',closeCard);
   document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>switchView(t.dataset.view));
 
-  try{
-    const r=await fetch('grotte_sardegna.geojson');
-    const g=await r.json();
-    all=g.features||[];
-    all.forEach(f=>{
-      const p=f.properties||{};
-      const cat=padCat(p.codice);
-      if(cat){
-        p.codice=cat;
-        const base=(p.nome_reale||p.nome||'').replace(/^\d+\s*-\s*/,'');
-        if(base) p.nome=cat+' - '+base;
+    try{
+    let g = null;
+    try {
+      const r = await fetch('grotte_sardegna.geojson');
+      if (r && r.ok) g = await r.json();
+    } catch (e1) {}
+    if (!g && 'caches' in window) {
+      const cached = await caches.match('grotte_sardegna.geojson') || await caches.match('./grotte_sardegna.geojson');
+      if (cached) g = await cached.json();
+    }
+    if (!g) throw new Error('nessun dato in cache');
+    all = g.features || [];
+    all.forEach(f => {
+      const p = f.properties || {};
+      const cat = padCat(p.codice);
+      if (cat) {
+        p.codice = cat;
+        const base = (p.nome_reale || p.nome || '').replace(/^\d+\s*-\s*/, '');
+        if (base) p.nome = cat + ' - ' + base;
       }
     });
     draw(all);
-    status(all.length+' grotte');
-  }catch(e){status('Errore dati');showError('Impossibile caricare le grotte: '+e.message);console.error(e);}
+    status(all.length + ' grotte' + (navigator.onLine ? '' : ' (offline)'));
+  } catch(e) {
+    status('Errore dati');
+    showError('Impossibile caricare le grotte offline. Apri l\'app online una volta per scaricarle.');
+    console.error(e);
+    // still allow favorites list
+  }
 
   if('serviceWorker' in navigator){try{await navigator.serviceWorker.register('sw.js');}catch(e){}}
+  await refreshFavIds();
   renderFavs();
   initTrackingUI();
 }

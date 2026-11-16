@@ -1,42 +1,93 @@
-const CACHE_NAME = 'csr-grotte-v81';
+const CACHE_NAME = 'csr-grotte-v83';
+const TILE_CACHE = 'csr-tiles-v83';
+const APP_ASSETS = [
+  './',
+  './index.html',
+  './app.js',
+  './sw.js',
+  './manifest.json',
+  './grotte_sardegna.geojson',
+  './leaflet.js',
+  './leaflet.css',
+  './icon-192.png',
+  './icon-512.png',
+  './images/marker-icon.png',
+  './images/marker-icon-2x.png',
+  './images/marker-shadow.png'
+];
+
+const TILE_HOSTS = [
+  'tile.openstreetmap.org',
+  'a.tile.openstreetmap.org',
+  'b.tile.openstreetmap.org',
+  'c.tile.openstreetmap.org',
+  'tile.opentopomap.org',
+  'a.tile.opentopomap.org',
+  'b.tile.opentopomap.org',
+  'c.tile.opentopomap.org',
+  'server.arcgisonline.com'
+];
 
 self.addEventListener('install', e => {
   self.skipWaiting();
   e.waitUntil(
-    caches.open(CACHE_NAME).then(c => c.addAll([
-      './',
-      './index.html',
-      './app.js',
-      './manifest.json',
-      './grotte_sardegna.geojson'
-    ]))
+    caches.open(CACHE_NAME).then(c =>
+      Promise.all(APP_ASSETS.map(u => c.add(u).catch(err => console.warn('cache skip', u, err))))
+    )
   );
 });
 
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+      Promise.all(
+        keys
+          .filter(k => k !== CACHE_NAME && k !== TILE_CACHE)
+          .map(k => caches.delete(k))
+      )
     ).then(() => self.clients.claim())
   );
 });
 
-self.addEventListener('fetch', event => {
-  const url = new URL(event.request.url);
+function isTile(url) {
+  return TILE_HOSTS.some(h => url.hostname === h || url.hostname.endsWith('.' + h));
+}
 
-  // Don't intercept CDN / external (Leaflet, OSM tiles, proxies)
-  if (url.origin !== self.location.origin) {
-    return; // browser default
+self.addEventListener('fetch', event => {
+  const req = event.request;
+  if (req.method !== 'GET') return;
+
+  const url = new URL(req.url);
+
+  // Map tiles: cache-first, then network and store
+  if (isTile(url)) {
+    event.respondWith(
+      caches.open(TILE_CACHE).then(cache =>
+        cache.match(req).then(cached => {
+          const net = fetch(req).then(res => {
+            if (res && res.ok) cache.put(req, res.clone());
+            return res;
+          }).catch(() => cached);
+          return cached || net;
+        })
+      )
+    );
+    return;
   }
 
-  // App files: network first, fallback cache
-  event.respondWith(
-    fetch(event.request).then(res => {
-      if (res && res.status === 200) {
-        const clone = res.clone();
-        caches.open(CACHE_NAME).then(c => c.put(event.request, clone));
-      }
-      return res;
-    }).catch(() => caches.match(event.request))
-  );
+  // Same origin: cache-first for app shell, network update in background
+  if (url.origin === self.location.origin) {
+    event.respondWith(
+      caches.match(req).then(cached => {
+        const net = fetch(req).then(res => {
+          if (res && res.ok) {
+            const clone = res.clone();
+            caches.open(CACHE_NAME).then(c => c.put(req, clone));
+          }
+          return res;
+        }).catch(() => cached);
+        return cached || net;
+      })
+    );
+  }
 });
