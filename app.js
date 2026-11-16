@@ -589,9 +589,18 @@ function draw(feats){
 
 
 
-const DOC_CACHE_NAME = 'csr-docs-v88';
+
+const DOC_CACHE_NAME = 'csr-docs-v89';
 let docZoom = 1;
 let docPinch = null;
+let docCurrentUrl = null;
+let docCurrentCodice = null;
+let docIsRilievo = false;
+let measureMode = 'pan'; // pan | calibrate | measure
+let measureScale = null; // meters per pixel at zoom 1 content coords
+let measureDraft = null; // {x1,y1,x2,y2}
+let measureItems = []; // {id,x1,y1,x2,y2,meters,label}
+let measureIdSeq = 1;
 
 function csrDocUrls(codice) {
   const c = padCat(codice);
@@ -616,13 +625,11 @@ function applyDocZoom() {
   docZoom = Math.max(1, Math.min(4, docZoom));
   wrap.style.transform = docZoom === 1 ? 'none' : `scale(${docZoom})`;
   wrap.style.width = docZoom === 1 ? '100%' : `${100 / docZoom}%`;
-  // Fit full page width first: iframe full viewport height at zoom 1
   frame.style.width = '100%';
-  frame.style.height = (window.innerHeight * 0.85 * Math.max(docZoom, 1)) + 'px';
-  if (docZoom === 1) {
-    frame.style.height = 'calc(100vh - 60px)';
-    frame.style.minHeight = 'calc(100vh - 60px)';
-  }
+  frame.style.height = 'calc(100vh - 110px)';
+  frame.style.minHeight = '70vh';
+  resizeMeasureSvg();
+  redrawMeasures();
 }
 function warmDocInIframe(url, timeoutMs = 10000) {
   return new Promise(resolve => {
@@ -652,35 +659,255 @@ async function cacheCaveDocs(codice) {
   if (!list.length || !navigator.onLine) return { ok: 0, total: 0 };
   let ok = 0;
   for (const d of list) {
-    try {
-      await warmDocInIframe(d.url, 12000);
-      ok++;
-    } catch (e) {}
+    try { await warmDocInIframe(d.url, 12000); ok++; } catch (e) {}
   }
   return { ok, total: list.length };
 }
-async function openCsrDoc(url, title) {
+
+function measureStorageKey(codice) {
+  return 'csr-misure-' + padCat(codice);
+}
+function loadMeasures(codice) {
+  if (!codice) return { scale: null, items: [] };
+  try {
+    const raw = JSON.parse(localStorage.getItem(measureStorageKey(codice)) || 'null');
+    if (!raw) return { scale: null, items: [] };
+    return { scale: raw.scale || null, items: Array.isArray(raw.items) ? raw.items : [] };
+  } catch (e) { return { scale: null, items: [] }; }
+}
+function saveMeasures() {
+  if (!docCurrentCodice || !docIsRilievo) return;
+  const payload = { scale: measureScale, items: measureItems, at: Date.now() };
+  localStorage.setItem(measureStorageKey(docCurrentCodice), JSON.stringify(payload));
+}
+function resizeMeasureSvg() {
+  const svg = document.getElementById('docMeasureSvg');
+  const wrap = document.getElementById('docZoomWrap');
+  const hit = document.getElementById('docMeasureHit');
+  if (!svg || !wrap) return;
+  const w = wrap.offsetWidth || wrap.clientWidth || 1;
+  const h = Math.max(wrap.offsetHeight || 0, document.getElementById('docFrame')?.offsetHeight || 0, 400);
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  svg.style.width = w + 'px';
+  svg.style.height = h + 'px';
+  if (hit) {
+    hit.style.width = w + 'px';
+    hit.style.height = h + 'px';
+  }
+}
+function pxDist(x1, y1, x2, y2) {
+  return Math.hypot(x2 - x1, y2 - y1);
+}
+function formatMeters(m) {
+  if (m == null || !isFinite(m)) return '—';
+  if (m < 1) return (m * 100).toFixed(1) + ' cm';
+  if (m < 10) return m.toFixed(2) + ' m';
+  return m.toFixed(1) + ' m';
+}
+function redrawMeasures() {
+  const svg = document.getElementById('docMeasureSvg');
+  if (!svg) return;
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  const all = measureItems.slice();
+  if (measureDraft) all.push({ ...measureDraft, draft: true });
+  all.forEach(it => {
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', it.x1); line.setAttribute('y1', it.y1);
+    line.setAttribute('x2', it.x2); line.setAttribute('y2', it.y2);
+    line.setAttribute('stroke', it.draft ? '#f5b942' : (it.calib ? '#3b9eff' : '#e85d5d'));
+    line.setAttribute('stroke-width', it.draft ? 3 : 2.5);
+    line.setAttribute('stroke-linecap', 'round');
+    if (it.calib) line.setAttribute('stroke-dasharray', '6 4');
+    svg.appendChild(line);
+    // endpoints
+    [[it.x1, it.y1], [it.x2, it.y2]].forEach(([x, y]) => {
+      const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      c.setAttribute('cx', x); c.setAttribute('cy', y); c.setAttribute('r', 5);
+      c.setAttribute('fill', it.draft ? '#f5b942' : '#fff');
+      c.setAttribute('stroke', it.draft ? '#f5b942' : '#e85d5d');
+      c.setAttribute('stroke-width', 2);
+      svg.appendChild(c);
+    });
+    if (it.meters != null || it.draft) {
+      const mx = (it.x1 + it.x2) / 2, my = (it.y1 + it.y2) / 2;
+      const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      label.setAttribute('x', mx); label.setAttribute('y', my - 8);
+      label.setAttribute('text-anchor', 'middle');
+      label.setAttribute('fill', '#fff');
+      label.setAttribute('font-size', '13');
+      label.setAttribute('font-weight', '700');
+      label.setAttribute('paint-order', 'stroke');
+      label.setAttribute('stroke', '#000');
+      label.setAttribute('stroke-width', '3');
+      let text = '';
+      if (it.calib) text = 'Scala';
+      else if (it.meters != null) text = formatMeters(it.meters);
+      else if (measureScale) text = formatMeters(pxDist(it.x1, it.y1, it.x2, it.y2) * measureScale);
+      else text = Math.round(pxDist(it.x1, it.y1, it.x2, it.y2)) + ' px';
+      label.textContent = text;
+      svg.appendChild(label);
+    }
+  });
+  renderMeasureList();
+  updateMeasureInfo();
+}
+function renderMeasureList() {
+  const el = document.getElementById('docMeasureList');
+  if (!el || !docIsRilievo) return;
+  el.style.display = 'block';
+  if (!measureItems.length) {
+    el.innerHTML = '<div style="color:#9aa4b8;font-size:12px">Nessuna misura. Imposta la scala, poi traccia segmenti.</div>';
+    return;
+  }
+  el.innerHTML = measureItems.map(it => {
+    const txt = it.calib
+      ? `Scala: ${formatMeters(it.meters)} (riferimento)`
+      : (it.label || formatMeters(it.meters));
+    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #243044">
+      <div style="flex:1;font-size:13px;font-weight:600;color:#e8eef8">${esc(txt)}</div>
+      <button type="button" data-mid="${it.id}" style="height:30px;padding:0 10px;border:none;border-radius:8px;background:#5a2030;color:#fff;font-size:12px;font-weight:700">Elimina</button>
+    </div>`;
+  }).join('');
+  el.querySelectorAll('button[data-mid]').forEach(b => {
+    b.onclick = () => {
+      const id = b.dataset.mid;
+      measureItems = measureItems.filter(x => String(x.id) !== String(id));
+      // if deleted last calib, keep scale unless no calib left
+      saveMeasures();
+      redrawMeasures();
+    };
+  });
+}
+function updateMeasureInfo() {
+  const info = document.getElementById('docMeasureInfo');
+  if (!info) return;
+  if (measureMode === 'calibrate') info.textContent = 'Traccia il segmento di riferimento sulla scala del rilievo';
+  else if (measureMode === 'measure') info.textContent = measureScale ? ('Scala ok · ' + formatMeters(measureScale) + '/px — traccia una misura') : 'Prima imposta la scala';
+  else info.textContent = measureScale ? ('Scala: ' + (measureScale * 100).toFixed(3) + ' cm/px · ' + measureItems.filter(x=>!x.calib).length + ' misure') : 'Imposta la scala del rilievo';
+}
+function setMeasureMode(mode) {
+  measureMode = mode;
+  const hit = document.getElementById('docMeasureHit');
+  if (hit) hit.style.display = (mode === 'calibrate' || mode === 'measure') ? 'block' : 'none';
+  const scroll = document.getElementById('docScroll');
+  if (scroll) scroll.style.touchAction = (mode === 'pan') ? 'pan-x pan-y' : 'none';
+  ['btnCalibrate','btnMeasure','btnMeasurePan'].forEach(id => {
+    const b = document.getElementById(id);
+    if (!b) return;
+    const on = (id === 'btnCalibrate' && mode === 'calibrate') || (id === 'btnMeasure' && mode === 'measure') || (id === 'btnMeasurePan' && mode === 'pan');
+    b.style.background = on ? '#3dcfb0' : '#243044';
+    b.style.color = on ? '#08221c' : '#fff';
+  });
+  updateMeasureInfo();
+}
+function contentPointFromEvent(e) {
+  const wrap = document.getElementById('docZoomWrap');
+  if (!wrap) return null;
+  const rect = wrap.getBoundingClientRect();
+  // account for CSS scale transform
+  const x = (e.clientX - rect.left) / docZoom;
+  const y = (e.clientY - rect.top) / docZoom;
+  return { x, y };
+}
+function onMeasureStart(e) {
+  if (measureMode !== 'calibrate' && measureMode !== 'measure') return;
+  e.preventDefault();
+  const pt = contentPointFromEvent(e.touches ? e.touches[0] : e);
+  if (!pt) return;
+  measureDraft = { x1: pt.x, y1: pt.y, x2: pt.x, y2: pt.y, draft: true };
+  redrawMeasures();
+}
+function onMeasureMove(e) {
+  if (!measureDraft) return;
+  e.preventDefault();
+  const pt = contentPointFromEvent(e.touches ? e.touches[0] : e);
+  if (!pt) return;
+  measureDraft.x2 = pt.x;
+  measureDraft.y2 = pt.y;
+  redrawMeasures();
+}
+function onMeasureEnd(e) {
+  if (!measureDraft) return;
+  e.preventDefault();
+  const d = measureDraft;
+  measureDraft = null;
+  const dist = pxDist(d.x1, d.y1, d.x2, d.y2);
+  if (dist < 8) { redrawMeasures(); return; }
+
+  if (measureMode === 'calibrate') {
+    const metersStr = prompt('Quanti metri corrisponde nella realtà questo segmento di riferimento?', '1');
+    if (metersStr == null) { redrawMeasures(); return; }
+    const meters = parseFloat(String(metersStr).replace(',', '.'));
+    if (!isFinite(meters) || meters <= 0) { status('Valore non valido'); redrawMeasures(); return; }
+    measureScale = meters / dist;
+    // remove old calib markers
+    measureItems = measureItems.filter(x => !x.calib);
+    measureItems.push({
+      id: 'c' + (measureIdSeq++),
+      x1: d.x1, y1: d.y1, x2: d.x2, y2: d.y2,
+      meters, calib: true, label: 'Scala ' + formatMeters(meters)
+    });
+    saveMeasures();
+    setMeasureMode('measure');
+    status('Scala impostata: ' + formatMeters(meters) + ' su ' + Math.round(dist) + ' px');
+  } else if (measureMode === 'measure') {
+    if (!measureScale) {
+      status('Imposta prima la scala');
+      redrawMeasures();
+      return;
+    }
+    const meters = dist * measureScale;
+    measureItems.push({
+      id: 'm' + (measureIdSeq++),
+      x1: d.x1, y1: d.y1, x2: d.x2, y2: d.y2,
+      meters, label: formatMeters(meters)
+    });
+    saveMeasures();
+    status('Misura: ' + formatMeters(meters));
+  }
+  redrawMeasures();
+}
+
+async function openCsrDoc(url, title, opts) {
+  opts = opts || {};
   const viewer = document.getElementById('docViewer');
   const frame = document.getElementById('docFrame');
   const tEl = document.getElementById('docTitle');
-  if (!viewer || !frame) {
-    window.open(url, '_blank');
-    return;
-  }
+  if (!viewer || !frame) { window.open(url, '_blank'); return; }
   if (tEl) tEl.textContent = title || 'Documento';
+  docCurrentUrl = url;
+  docCurrentCodice = opts.codice ? padCat(opts.codice) : (cur && cur.properties ? padCat(cur.properties.codice) : null);
+  docIsRilievo = !!(opts.isRilievo || (title && /rilievo/i.test(title)) || /rilievo-pdf/i.test(url));
   docZoom = 1;
   applyDocZoom();
   viewer.style.display = 'flex';
 
-  // Prefer network when online (and cache via SW); offline relies on SW cache
+  const bar = document.getElementById('docMeasureBar');
+  const list = document.getElementById('docMeasureList');
+  if (bar) bar.style.display = docIsRilievo ? 'flex' : 'none';
+  if (list) list.style.display = docIsRilievo ? 'block' : 'none';
+
+  if (docIsRilievo && docCurrentCodice) {
+    const saved = loadMeasures(docCurrentCodice);
+    measureScale = saved.scale;
+    measureItems = saved.items || [];
+    measureIdSeq = measureItems.reduce((m, it) => Math.max(m, parseInt(String(it.id).replace(/\D/g,''),10)||0), 0) + 1;
+  } else {
+    measureScale = null;
+    measureItems = [];
+  }
+  measureDraft = null;
+  setMeasureMode(docIsRilievo ? (measureScale ? 'measure' : 'pan') : 'pan');
+  redrawMeasures();
+
   frame.src = 'about:blank';
   setTimeout(() => {
     frame.src = url;
     applyDocZoom();
+    setTimeout(() => { resizeMeasureSvg(); redrawMeasures(); }, 400);
   }, 30);
 
   if (navigator.onLine) {
-    // Ensure SW/cache gets a copy after load
     const onLoad = async () => {
       frame.removeEventListener('load', onLoad);
       try {
@@ -688,6 +915,8 @@ async function openCsrDoc(url, title) {
         await cache.add(url).catch(() => null);
       } catch (e) {}
       applyDocZoom();
+      resizeMeasureSvg();
+      redrawMeasures();
     };
     frame.addEventListener('load', onLoad);
   } else {
@@ -696,19 +925,52 @@ async function openCsrDoc(url, title) {
   }
 }
 function closeDocViewer() {
+  saveMeasures();
   const viewer = document.getElementById('docViewer');
   const frame = document.getElementById('docFrame');
   if (frame) frame.src = 'about:blank';
   if (viewer) viewer.style.display = 'none';
   docZoom = 1;
+  measureDraft = null;
+  setMeasureMode('pan');
 }
 window.appCloseDoc = closeDocViewer;
 
 function initDocViewerUI() {
-  initDocViewerUI();
+  document.getElementById('docClose')?.addEventListener('click', closeDocViewer);
   document.getElementById('docZoomIn')?.addEventListener('click', () => { docZoom += 0.25; applyDocZoom(); });
   document.getElementById('docZoomOut')?.addEventListener('click', () => { docZoom -= 0.25; applyDocZoom(); });
   document.getElementById('docZoomReset')?.addEventListener('click', () => { docZoom = 1; applyDocZoom(); });
+  document.getElementById('btnCalibrate')?.addEventListener('click', () => setMeasureMode('calibrate'));
+  document.getElementById('btnMeasure')?.addEventListener('click', () => {
+    if (!measureScale) { status('Prima imposta la scala'); setMeasureMode('calibrate'); return; }
+    setMeasureMode('measure');
+  });
+  document.getElementById('btnMeasurePan')?.addEventListener('click', () => setMeasureMode('pan'));
+  document.getElementById('btnMeasureUndo')?.addEventListener('click', () => {
+    if (!measureItems.length) return;
+    measureItems.pop();
+    saveMeasures();
+    redrawMeasures();
+  });
+  document.getElementById('btnMeasureClear')?.addEventListener('click', () => {
+    if (!measureItems.length) return;
+    if (!confirm('Cancellare tutte le misure di questo rilievo?')) return;
+    measureItems = [];
+    // keep scale
+    saveMeasures();
+    redrawMeasures();
+  });
+  const hit = document.getElementById('docMeasureHit');
+  if (hit) {
+    hit.addEventListener('pointerdown', onMeasureStart);
+    hit.addEventListener('pointermove', onMeasureMove);
+    hit.addEventListener('pointerup', onMeasureEnd);
+    hit.addEventListener('pointercancel', onMeasureEnd);
+    hit.addEventListener('touchstart', onMeasureStart, { passive: false });
+    hit.addEventListener('touchmove', onMeasureMove, { passive: false });
+    hit.addEventListener('touchend', onMeasureEnd, { passive: false });
+  }
   const scroll = document.getElementById('docScroll');
   if (scroll) {
     scroll.addEventListener('touchstart', e => {
@@ -729,6 +991,7 @@ function initDocViewerUI() {
     }, { passive: true });
     scroll.addEventListener('touchend', () => { docPinch = null; }, { passive: true });
   }
+  window.addEventListener('resize', () => { resizeMeasureSvg(); redrawMeasures(); });
 }
 
 function openCard(f){
@@ -777,7 +1040,10 @@ function openCard(f){
           status('Documento non in cache: aprilo online una volta');
         }
       }
-      openCsrDoc(url, title);
+      openCsrDoc(url, title, {
+        codice: codice || p.codice,
+        isRilievo: /rilievo/i.test(title) || /rilievo-pdf/i.test(url)
+      });
     });
   });
   refreshFavIds().then(() => {
@@ -1720,13 +1986,21 @@ function initTrackingUI() {
 
 async function exportBackup(){
   const favs = await allFavs();
+  const misure = {};
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith('csr-misure-')) {
+      try { misure[k] = JSON.parse(localStorage.getItem(k)); } catch(e) {}
+    }
+  }
   const data = {
     v: 1,
     when: new Date().toISOString(),
     preferiti: favs,
     tracce: savedTracks,
     punti: savedPois,
-    esplorate: loadExplored()
+    esplorate: loadExplored(),
+    misure
   };
   const blob = new Blob([JSON.stringify(data)], {type:'application/json'});
   const a = document.createElement('a');
@@ -1764,6 +2038,11 @@ async function importBackup(file){
   if (Array.isArray(data.tracce)) { savedTracks = data.tracce; persistTracks(); }
   if (Array.isArray(data.punti)) { savedPois = data.punti; persistPois(); drawPois(); }
   if (Array.isArray(data.esplorate)) saveExplored(data.esplorate);
+  if (data.misure && typeof data.misure === 'object') {
+    Object.keys(data.misure).forEach(k => {
+      try { localStorage.setItem(k, JSON.stringify(data.misure[k])); } catch(e) {}
+    });
+  }
   if (Array.isArray(data.preferiti) && db) {
     const tx = db.transaction(STORE_FAV,'readwrite');
     const st = tx.objectStore(STORE_FAV);
