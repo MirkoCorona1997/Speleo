@@ -15,7 +15,7 @@
 :root{
   --bg:#1a2332;--panel:#243044;--panel2:#2c3a50;--line:#3a4a63;
   --text:#eef2f7;--muted:#9aabbc;--accent:#3dcfb0;--accent2:#2a9f88;
-  --danger:#e85d5d;--safe-b:env(safe-area-inset-bottom,0px);--safe-t:env(safe-area-inset-top,0px);--tab:56px;
+  --danger:#e85d5d;--safe-b:env(safe-area-inset-bottom,0px);--safe-t:env(safe-area-inset-top,0px);--tab:48px;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{
@@ -130,16 +130,16 @@ html,body{
   height:calc(var(--tab) + var(--safe-b));
   padding-bottom:var(--safe-b);
   background:var(--panel);border-top:1px solid var(--line);display:flex;
-  align-items:flex-start;
+  align-items:flex-end;
   box-sizing:border-box;
 }
 .tab{
-  flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
-  gap:1px;background:none;border:none;color:var(--muted);font-size:10px;font-weight:700;cursor:pointer;
-  height:var(--tab);padding:4px 0 0;margin:0;
+  flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;
+  gap:0;background:none;border:none;color:var(--muted);font-size:9px;font-weight:700;cursor:pointer;
+  height:var(--tab);padding:0 0 4px;margin:0;
 }
 .tab.on{color:var(--accent)}
-.tab .i{font-size:20px}
+.tab .i{font-size:18px;line-height:1}
 
 #view-preferiti, #view-esplorate{background:var(--bg);overflow-y:auto;-webkit-overflow-scrolling:touch;padding:max(16px,var(--safe-t)) 14px 20px;z-index:2}
 #view-preferiti h1, #view-esplorate h1{font-size:24px;font-weight:800;margin-bottom:2px}
@@ -288,7 +288,7 @@ html,body{
 </style>
 </head>
 <body>
-<div class="ver">v9.3</div>
+<div class="ver">v9.4</div>
 <div class="offline" id="offlineBadge">OFFLINE</div>
 <div class="errbox" id="errbox"></div>
 <div id="docViewer" style="display:none;position:fixed;inset:0;z-index:5000;background:#0b1220;flex-direction:column;height:100%;height:100dvh">

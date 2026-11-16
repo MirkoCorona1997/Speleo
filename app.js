@@ -592,7 +592,7 @@ function draw(feats){
 
 
 
-const DOC_CACHE_NAME = 'csr-docs-v93';
+const DOC_CACHE_NAME = 'csr-docs-v94';
 let docZoom = 1;
 let docPinch = null;
 let docCurrentUrl = null;
@@ -665,18 +665,12 @@ async function updateDocReadyLabels(codice) {
     if (cached) {
       ready++;
       markDocReady(codice, d.key);
-      if (!/✓/.test(a.textContent)) a.textContent = d.label + ' ✓';
+      a.textContent = d.label + ' ✓';
       a.style.boxShadow = 'inset 0 0 0 1px #3dcfb0';
     } else {
       a.textContent = d.label;
       a.style.boxShadow = '';
     }
-  }
-  const info = document.getElementById('docReadyInfo');
-  if (info) {
-    if (!list.length) info.textContent = '';
-    else if (ready === list.length) info.textContent = 'Documenti offline: tutti pronti ✓';
-    else info.textContent = `Documenti offline: ${ready}/${list.length} pronti — apri quelli senza ✓`;
   }
   return ready;
 }
@@ -1109,33 +1103,31 @@ function openCard(f){
       const cls = d.key === 'scheda' ? 'ba' : 'bb';
       const ready = isDocMarkedReady(codice, d.key);
       const label = d.label + (ready ? ' ✓' : '');
-      docs += `<a class="${cls}" href="${d.url}" target="_blank" rel="noopener" data-csr-url="${d.url}" data-csr-title="${d.label}" data-csr-key="${d.key}" style="${ready ? 'box-shadow:inset 0 0 0 1px #3dcfb0' : ''}">${label}</a>`;
+      docs += `<button type="button" class="${cls}" data-csr-url="${d.url}" data-csr-title="${d.label}" data-csr-key="${d.key}" style="${ready ? 'box-shadow:inset 0 0 0 1px #3dcfb0' : ''}">${label}</button>`;
     });
-    docs += `<div id="docReadyInfo" class="bc" style="grid-column:1/-1;text-align:center;opacity:.9;font-size:11px!important;height:auto!important;padding:4px 0">Documenti offline: …</div>`;
   } else {
     docs += `<span class="bc" style="opacity:.7">Documenti non disponibili (manca n. catastale)</span>`;
   }
   document.getElementById('cardActions').innerHTML =
     docs +
     `<a class="bb" href="https://www.google.com/maps/dir/?api=1&destination=${la},${lo}&travelmode=driving" target="_blank" rel="noopener">Google Maps</a>` +
-    `<button class="bc" id="expBtn">${isExplored(p.id_ost) ? '✓  Esplorata' : '○  Segna esplorata'}</button>` +
-    `<button class="bc" id="saveBtn">${isFav(p.id_ost) ? '★  Salvata offline' : '○  Salva offline'}</button>`;
+    `<button type="button" class="bc" id="expBtn">${isExplored(p.id_ost) ? '✓  Esplorata' : '○  Segna esplorata'}</button>` +
+    `<button type="button" class="bc" id="saveBtn">${isFav(p.id_ost) ? '★  Salvata offline' : '○  Salva offline'}</button>`;
   document.getElementById('card').classList.add('open');
-  document.getElementById('saveBtn')?.addEventListener('click',()=>toggleFav(f));
-  document.getElementById('expBtn')?.addEventListener('click',()=>toggleExplored(f));
-  document.querySelectorAll('#cardActions [data-csr-url]').forEach(a => {
-    a.addEventListener('click', e => {
+  document.getElementById('saveBtn')?.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); toggleFav(f); });
+  document.getElementById('expBtn')?.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); toggleExplored(f); });
+  document.querySelectorAll('#cardActions [data-csr-url]').forEach(btn => {
+    const open = e => {
       e.preventDefault();
-      const url = a.getAttribute('href') || a.dataset.csrUrl;
-      const title = a.dataset.csrTitle || 'Documento';
-      const key = a.dataset.csrKey || '';
+      e.stopPropagation();
+      const url = btn.dataset.csrUrl;
+      const title = btn.dataset.csrTitle || 'Documento';
+      const key = btn.dataset.csrKey || '';
+      if (!url) return;
       const isRilievo = key === 'rilievo' || /rilievo/i.test(title) || /rilievo-pdf/i.test(url);
-      openCsrDoc(url, title, {
-        codice: codice || p.codice,
-        isRilievo,
-        docKey: key
-      });
-    });
+      openCsrDoc(url, title, { codice: codice || p.codice, isRilievo, docKey: key });
+    };
+    btn.addEventListener('click', open);
   });
   if (codice) updateDocReadyLabels(codice);
   refreshFavIds().then(() => {
