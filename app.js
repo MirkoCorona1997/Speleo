@@ -370,6 +370,8 @@ function initMap(){
   map=L.map('map',{zoomControl:false,attributionControl:false}).setView([40.05,9.0],8);
   setTimeout(()=>{try{map.invalidateSize();}catch(e){}},200);
   setTimeout(()=>{try{map.invalidateSize();}catch(e){}},600);
+  window.addEventListener('resize',()=>{try{map.invalidateSize();}catch(e){}});
+  if(window.visualViewport){visualViewport.addEventListener('resize',()=>{try{map.invalidateSize();}catch(e){}});}
   baseOsm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18, attribution:'© OSM'});
   baseTopo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',{
     maxZoom:17,
@@ -590,7 +592,7 @@ function draw(feats){
 
 
 
-const DOC_CACHE_NAME = 'csr-docs-v89';
+const DOC_CACHE_NAME = 'csr-docs-v90';
 let docZoom = 1;
 let docPinch = null;
 let docCurrentUrl = null;
@@ -621,13 +623,17 @@ async function isDocCached(url) {
 function applyDocZoom() {
   const wrap = document.getElementById('docZoomWrap');
   const frame = document.getElementById('docFrame');
+  const scroll = document.getElementById('docScroll');
   if (!wrap || !frame) return;
   docZoom = Math.max(1, Math.min(4, docZoom));
+  const h = scroll ? scroll.clientHeight : Math.floor(window.innerHeight * 0.7);
+  wrap.style.height = h + 'px';
   wrap.style.transform = docZoom === 1 ? 'none' : `scale(${docZoom})`;
   wrap.style.width = docZoom === 1 ? '100%' : `${100 / docZoom}%`;
+  wrap.style.transformOrigin = '0 0';
   frame.style.width = '100%';
-  frame.style.height = 'calc(100vh - 110px)';
-  frame.style.minHeight = '70vh';
+  frame.style.height = '100%';
+  frame.style.minHeight = '0';
   resizeMeasureSvg();
   redrawMeasures();
 }
@@ -753,12 +759,15 @@ function redrawMeasures() {
 }
 function renderMeasureList() {
   const el = document.getElementById('docMeasureList');
-  if (!el || !docIsRilievo) return;
-  el.style.display = 'block';
-  if (!measureItems.length) {
-    el.innerHTML = '<div style="color:#9aa4b8;font-size:12px">Nessuna misura. Imposta la scala, poi traccia segmenti.</div>';
+  if (!el) return;
+  if (!docIsRilievo || !measureItems.length) {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    applyDocZoom();
     return;
   }
+  el.style.display = 'block';
+
   el.innerHTML = measureItems.map(it => {
     const txt = it.calib
       ? `Scala: ${formatMeters(it.meters)} (riferimento)`
@@ -885,7 +894,7 @@ async function openCsrDoc(url, title, opts) {
   const bar = document.getElementById('docMeasureBar');
   const list = document.getElementById('docMeasureList');
   if (bar) bar.style.display = docIsRilievo ? 'flex' : 'none';
-  if (list) list.style.display = docIsRilievo ? 'block' : 'none';
+  if (list) list.style.display = 'none';
 
   if (docIsRilievo && docCurrentCodice) {
     const saved = loadMeasures(docCurrentCodice);
@@ -902,9 +911,13 @@ async function openCsrDoc(url, title, opts) {
 
   frame.src = 'about:blank';
   setTimeout(() => {
-    frame.src = url;
+    // Fit entire page in built-in PDF viewers (Chrome/Safari where supported)
+    let src = url;
+    if (!/#/.test(src)) src += '#view=Fit&toolbar=1';
+    frame.src = src;
     applyDocZoom();
-    setTimeout(() => { resizeMeasureSvg(); redrawMeasures(); }, 400);
+    setTimeout(() => { applyDocZoom(); resizeMeasureSvg(); redrawMeasures(); }, 300);
+    setTimeout(() => { applyDocZoom(); resizeMeasureSvg(); }, 800);
   }, 30);
 
   if (navigator.onLine) {

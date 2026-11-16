@@ -18,8 +18,13 @@
   --danger:#e85d5d;--safe-b:env(safe-area-inset-bottom,0px);--safe-t:env(safe-area-inset-top,0px);--tab:56px;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);overflow:hidden;position:fixed}
-.view{position:absolute;top:0;left:0;right:0;bottom:calc(var(--tab) + var(--safe-b));display:none}
+html,body{
+  height:100%;height:100dvh;width:100%;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  background:var(--bg);color:var(--text);overflow:hidden;position:fixed;
+  overscroll-behavior:none;
+}
+.view{position:absolute;top:0;left:0;right:0;bottom:var(--tab);display:none}
 .view.active{display:block}
 #map{position:absolute;top:0;left:0;right:0;bottom:0;width:100%;height:100%;background:#1a2332;z-index:1}
 
@@ -99,7 +104,7 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
 }
 
 .chip{
-  position:absolute;bottom:12px;left:50%;transform:translateX(-50%);
+  position:absolute;bottom:10px;left:50%;transform:translateX(-50%);
   background:rgba(36,48,68,.95);border:1px solid var(--line);color:var(--muted);
   padding:6px 14px;border-radius:16px;font-size:12px;font-weight:600;z-index:900;pointer-events:none;
 }
@@ -110,7 +115,7 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
 }
 .offline.show{display:block}
 .hint-bar{
-  position:absolute;bottom:44px;left:50%;transform:translateX(-50%);z-index:800;
+  position:absolute;bottom:48px;left:50%;transform:translateX(-50%);z-index:800;
   font-size:11px;color:var(--muted);background:rgba(26,35,50,.85);padding:4px 12px;border-radius:10px;
   pointer-events:none;white-space:nowrap;
 }
@@ -122,12 +127,16 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
 
 .tabs{
   position:fixed;bottom:0;left:0;right:0;z-index:2000;
-  height:calc(var(--tab)+var(--safe-b));padding-bottom:var(--safe-b);
+  height:calc(var(--tab) + var(--safe-b));
+  padding:0;padding-bottom:var(--safe-b);
   background:var(--panel);border-top:1px solid var(--line);display:flex;
+  align-items:stretch;
+  box-sizing:border-box;
 }
 .tab{
   flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
-  gap:2px;background:none;border:none;color:var(--muted);font-size:10px;font-weight:700;cursor:pointer;padding-top:6px;
+  gap:2px;background:none;border:none;color:var(--muted);font-size:10px;font-weight:700;cursor:pointer;
+  height:var(--tab);padding:0;margin:0;
 }
 .tab.on{color:var(--accent)}
 .tab .i{font-size:20px}
@@ -174,7 +183,7 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
 }
 .track-bar {
   position: fixed; left: 10px; right: 10px;
-  bottom: calc(12px + var(--tab) + var(--safe-b));
+  bottom: calc(12px + var(--tab));
   z-index: 2600; display: none; pointer-events: auto;
   background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
   padding: 10px 12px; box-shadow: 0 6px 24px rgba(0,0,0,.4);
@@ -215,7 +224,7 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
 }
 .tr-card .acts .del { color: var(--danger); }
 .fab-track {
-  position: absolute; right: 12px; bottom: calc(70px + var(--tab) + var(--safe-b));
+  position: absolute; right: 12px; bottom: calc(70px + var(--tab));
   z-index: 900; width: 52px; height: 52px; border-radius: 26px;
   background: var(--accent2); color: #fff; border: none; font-size: 22px;
   box-shadow: 0 4px 16px rgba(0,0,0,.4); cursor: pointer;
@@ -233,7 +242,7 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
 
 .tr-detail {
   display: none;
-  position: fixed; left: 0; right: 0; bottom: calc(var(--tab) + var(--safe-b)); z-index: 2500;
+  position: fixed; left: 0; right: 0; bottom: var(--tab); z-index: 2500;
   background: var(--panel); border-radius: 20px 20px 0 0;
   border-top: 1px solid var(--line);
   max-height: calc(78vh - var(--tab)); overflow-y: auto; -webkit-overflow-scrolling: touch;
@@ -279,10 +288,10 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
 </style>
 </head>
 <body>
-<div class="ver">v8.9</div>
+<div class="ver">v9.1</div>
 <div class="offline" id="offlineBadge">OFFLINE</div>
 <div class="errbox" id="errbox"></div>
-<div id="docViewer" style="display:none;position:fixed;inset:0;z-index:5000;background:#0b1220;flex-direction:column">
+<div id="docViewer" style="display:none;position:fixed;inset:0;z-index:5000;background:#0b1220;flex-direction:column;height:100%;height:100dvh">
   <div style="display:flex;align-items:center;gap:6px;padding:8px 10px;padding-top:calc(8px + var(--safe-t));background:#151c2c;border-bottom:1px solid var(--line);flex-wrap:wrap">
     <button type="button" id="docClose" style="height:34px;padding:0 12px;border:none;border-radius:10px;background:#243044;color:#fff;font-weight:700">Chiudi</button>
     <div id="docTitle" style="flex:1;min-width:80px;font-size:13px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Documento</div>
@@ -298,14 +307,14 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
     <button type="button" class="docm-btn" id="btnMeasureClear" style="height:34px;padding:0 10px;border:none;border-radius:10px;background:#5a2030;color:#fff;font-weight:700;font-size:12px">Cancella tutto</button>
     <span id="docMeasureInfo" style="font-size:12px;color:#9aa4b8;margin-left:4px">Imposta la scala</span>
   </div>
-  <div id="docScroll" style="flex:1;overflow:auto;-webkit-overflow-scrolling:touch;background:#1a1a1a;position:relative;touch-action:pan-x pan-y">
-    <div id="docZoomWrap" style="transform-origin:0 0;width:100%;min-height:100%;position:relative">
-      <iframe id="docFrame" title="Documento" style="width:100%;height:calc(100vh - 110px);min-height:70vh;border:0;background:#fff;display:block"></iframe>
+  <div id="docScroll" style="flex:1;min-height:0;overflow:hidden;-webkit-overflow-scrolling:touch;background:#1a1a1a;position:relative;touch-action:pan-x pan-y">
+    <div id="docZoomWrap" style="transform-origin:0 0;width:100%;height:100%;position:relative">
+      <iframe id="docFrame" title="Documento" style="width:100%;height:100%;border:0;background:#fff;display:block"></iframe>
       <svg id="docMeasureSvg" style="position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:2"></svg>
       <div id="docMeasureHit" style="position:absolute;left:0;top:0;width:100%;height:100%;z-index:3;display:none;touch-action:none"></div>
     </div>
   </div>
-  <div id="docMeasureList" style="display:none;max-height:28vh;overflow:auto;background:#121826;border-top:1px solid var(--line);padding:8px 10px;padding-bottom:calc(8px + var(--safe-b))"></div>
+  <div id="docMeasureList" style="display:none;max-height:22vh;overflow:auto;background:#121826;border-top:1px solid var(--line);padding:6px 10px;padding-bottom:calc(6px + var(--safe-b))"></div>
 </div>
 
 <div class="view active" id="view-map">
@@ -339,7 +348,7 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
     <button class="go" id="applyFilters">Applica</button>
   </div>
   <div class="chip" id="status">Caricamento…</div>
-  <button type="button" id="backupBanner" style="display:none;position:absolute;left:10px;right:10px;bottom:calc(12px + var(--tab) + var(--safe-b));z-index:2400;background:#243044;color:#fff;border:1px solid var(--line);border-radius:14px;padding:12px;text-align:left;font-size:13px">Sono passati 7 giorni. Tocca per scaricare il backup e salvarlo in File.</button>
+  <button type="button" id="backupBanner" style="display:none;position:absolute;left:10px;right:10px;bottom:calc(12px + var(--tab));z-index:2400;background:#243044;color:#fff;border:1px solid var(--line);border-radius:14px;padding:12px;text-align:left;font-size:13px">Sono passati 7 giorni. Tocca per scaricare il backup e salvarlo in File.</button>
   <div class="hint-bar">Tieni premuto per navigare</div>
   <div class="mode-chip" id="modeChip">Percorso: vicino al sentiero lo segue, lontano usa il tuo punto</div>
   <div class="track-bar" id="trackBar">
