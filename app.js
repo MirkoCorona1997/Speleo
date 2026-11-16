@@ -592,7 +592,7 @@ function draw(feats){
 
 
 
-const DOC_CACHE_NAME = 'csr-docs-v94';
+const DOC_CACHE_NAME = 'csr-docs-v95';
 let docZoom = 1;
 let docPinch = null;
 let docCurrentUrl = null;
@@ -1103,31 +1103,42 @@ function openCard(f){
       const cls = d.key === 'scheda' ? 'ba' : 'bb';
       const ready = isDocMarkedReady(codice, d.key);
       const label = d.label + (ready ? ' ✓' : '');
-      docs += `<button type="button" class="${cls}" data-csr-url="${d.url}" data-csr-title="${d.label}" data-csr-key="${d.key}" style="${ready ? 'box-shadow:inset 0 0 0 1px #3dcfb0' : ''}">${label}</button>`;
+      // Pure links: most reliable on iOS Safari / PWA
+      docs += `<a class="${cls}" href="${d.url}" target="_blank" rel="noopener noreferrer" data-csr-key="${d.key}" data-csr-title="${d.label}" style="${ready ? 'box-shadow:inset 0 0 0 1px #3dcfb0' : ''}">${label}</a>`;
     });
   } else {
     docs += `<span class="bc" style="opacity:.7">Documenti non disponibili (manca n. catastale)</span>`;
   }
   document.getElementById('cardActions').innerHTML =
     docs +
-    `<a class="bb" href="https://www.google.com/maps/dir/?api=1&destination=${la},${lo}&travelmode=driving" target="_blank" rel="noopener">Google Maps</a>` +
+    `<a class="bb" href="https://www.google.com/maps/dir/?api=1&destination=${la},${lo}&travelmode=driving" target="_blank" rel="noopener noreferrer">Google Maps</a>` +
     `<button type="button" class="bc" id="expBtn">${isExplored(p.id_ost) ? '✓  Esplorata' : '○  Segna esplorata'}</button>` +
     `<button type="button" class="bc" id="saveBtn">${isFav(p.id_ost) ? '★  Salvata offline' : '○  Salva offline'}</button>`;
-  document.getElementById('card').classList.add('open');
-  document.getElementById('saveBtn')?.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); toggleFav(f); });
-  document.getElementById('expBtn')?.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); toggleExplored(f); });
-  document.querySelectorAll('#cardActions [data-csr-url]').forEach(btn => {
-    const open = e => {
-      e.preventDefault();
-      e.stopPropagation();
-      const url = btn.dataset.csrUrl;
-      const title = btn.dataset.csrTitle || 'Documento';
-      const key = btn.dataset.csrKey || '';
-      if (!url) return;
-      const isRilievo = key === 'rilievo' || /rilievo/i.test(title) || /rilievo-pdf/i.test(url);
-      openCsrDoc(url, title, { codice: codice || p.codice, isRilievo, docKey: key });
-    };
-    btn.addEventListener('click', open);
+  const cardEl = document.getElementById('card');
+  cardEl.classList.add('open');
+  // stop map from eating touches on the card
+  cardEl.onclick = e => e.stopPropagation();
+  cardEl.ontouchstart = e => e.stopPropagation();
+
+  document.getElementById('saveBtn').onclick = e => { e.preventDefault(); e.stopPropagation(); toggleFav(f); };
+  document.getElementById('expBtn').onclick = e => { e.preventDefault(); e.stopPropagation(); toggleExplored(f); };
+
+  // After opening a doc link, mark ready when user returns (and try cache)
+  document.querySelectorAll('#cardActions a[data-csr-key]').forEach(a => {
+    a.addEventListener('click', () => {
+      const key = a.dataset.csrKey;
+      const url = a.href;
+      // do NOT preventDefault — let the browser open the link
+      setTimeout(() => {
+        if (codice && key) {
+          markDocReady(codice, key);
+          try {
+            caches.open(DOC_CACHE_NAME).then(c => c.add(url).catch(() => {}));
+          } catch (err) {}
+          updateDocReadyLabels(codice);
+        }
+      }, 1500);
+    }, true);
   });
   if (codice) updateDocReadyLabels(codice);
   refreshFavIds().then(() => {
