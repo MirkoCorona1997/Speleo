@@ -150,10 +150,9 @@ async function toggleFav(f){
     favIds.add(id);
     status('Salvata offline ★');
     if (navigator.onLine && f.properties.codice) {
-      status('Salvata ★ — scarico PDF…');
+      status('Salvata ★ — scarico schede…');
       cacheCaveDocs(f.properties.codice).then(({ok, total}) => {
-        if (total) status(ok ? `Salvata ★ — ${ok}/${total} documenti in cache` : 'Salvata ★ — PDF non scaricabili ora');
-        updateDocButtons(f.properties.codice);
+        if (total) status(ok === total ? 'Salvata ★ — documenti offline pronti' : `Salvata ★ — ${ok}/${total} documenti offline`);
       });
     }
   }
@@ -588,7 +587,7 @@ function draw(feats){
 }
 
 
-const DOC_CACHE_NAME = 'csr-docs-v85';
+const DOC_CACHE_NAME = 'csr-docs-v86';
 function csrDocUrls(codice) {
   const c = padCat(codice);
   if (!c) return [];
@@ -608,9 +607,16 @@ async function isDocCached(url) {
 async function cacheDoc(url) {
   try {
     const cache = await caches.open(DOC_CACHE_NAME);
-    // no-cors allows caching opaque PDF responses without CORS headers
-    const res = await fetch(url, { mode: 'no-cors', credentials: 'omit', cache: 'reload' });
-    await cache.put(url, res);
+    let res = null;
+    try {
+      res = await fetch(url, { mode: 'cors', credentials: 'omit', cache: 'reload', redirect: 'follow' });
+    } catch (e1) {
+      res = await fetch(url, { mode: 'no-cors', credentials: 'omit', cache: 'reload' });
+    }
+    if (!res) return false;
+    await cache.put(url, res.clone ? res.clone() : res);
+    // also store under Request so SW match is reliable
+    await cache.put(new Request(url, { mode: 'no-cors' }), res.clone ? res : res);
     return true;
   } catch (e) {
     console.warn('doc cache fail', url, e);
@@ -672,13 +678,14 @@ function openCard(f){
     (p.ambito?`<span class="pill">${esc(p.ambito)}</span>`:'')+
     `<span class="pill">${la.toFixed(5)}, ${lo.toFixed(5)}</span>`;
   const codice = padCat(p.codice);
+  const csrScheda = codice ? `https://m.catastospeleologicoregionale.sardegna.it/scheda-catastale/${codice}` : null;
+  const csrPos = codice ? `https://www.catastospeleologicoregionale.sardegna.it/scheda-posizionamento/${codice}` : null;
+  const csrRilievo = codice ? `https://www.catastospeleologicoregionale.sardegna.it/rilievo-pdf/${codice}` : null;
   let docs = '';
-  if (codice) {
-    docs += `<button type="button" class="ba" data-doc="scheda" data-url="https://m.catastospeleologicoregionale.sardegna.it/scheda-catastale/${codice}">Scheda completa</button>`;
-    docs += `<button type="button" class="bb" data-doc="pos" data-url="https://www.catastospeleologicoregionale.sardegna.it/scheda-posizionamento/${codice}">Scheda posizionamento</button>`;
-    docs += `<button type="button" class="bb" data-doc="rilievo" data-url="https://www.catastospeleologicoregionale.sardegna.it/rilievo-pdf/${codice}">Rilievo PDF</button>`;
-    docs += `<button type="button" class="bc" id="dlDocsBtn">⬇ Documenti offline</button>`;
-  } else {
+  if (csrScheda) docs += `<a class="ba" href="${csrScheda}" target="_blank" rel="noopener">Scheda completa</a>`;
+  if (csrPos) docs += `<a class="bb" href="${csrPos}" target="_blank" rel="noopener">Scheda posizionamento</a>`;
+  if (csrRilievo) docs += `<a class="bb" href="${csrRilievo}" target="_blank" rel="noopener">Rilievo PDF</a>`;
+  if (!csrScheda && !csrPos && !csrRilievo) {
     docs += `<span class="bc" style="opacity:.7">Documenti non disponibili (manca n. catastale)</span>`;
   }
   document.getElementById('cardActions').innerHTML =
@@ -689,19 +696,6 @@ function openCard(f){
   document.getElementById('card').classList.add('open');
   document.getElementById('saveBtn')?.addEventListener('click',()=>toggleFav(f));
   document.getElementById('expBtn')?.addEventListener('click',()=>toggleExplored(f));
-  document.querySelectorAll('#cardActions [data-doc]').forEach(btn => {
-    btn.addEventListener('click', () => openDoc(btn.dataset.url, btn.textContent));
-  });
-  document.getElementById('dlDocsBtn')?.addEventListener('click', async () => {
-    if (!navigator.onLine) { status('Serve connessione per scaricare i PDF'); return; }
-    if (!codice) return;
-    status('Scarico documenti…');
-    const {ok, total} = await cacheCaveDocs(codice);
-    status(total ? `${ok}/${total} documenti salvati offline` : 'Nessun documento');
-    updateDocButtons(codice);
-  });
-  if (codice) updateDocButtons(codice);
-  // refresh state if favIds not yet loaded
   refreshFavIds().then(() => {
     const b = document.getElementById('saveBtn');
     if (b && cur && cur.properties && String(cur.properties.id_ost) === String(p.id_ost)) {
