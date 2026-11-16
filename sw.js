@@ -1,6 +1,6 @@
-const CACHE_NAME = 'csr-grotte-v95';
-const TILE_CACHE = 'csr-tiles-v95';
-const DOC_CACHE = 'csr-docs-v95';
+const CACHE_NAME = 'csr-grotte-v96';
+const TILE_CACHE = 'csr-tiles-v96';
+const DOC_CACHE = 'csr-docs-v96';
 const APP_ASSETS = [
   './',
   './index.html',
@@ -68,47 +68,41 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // CSR documents: network first when online, always update cache; cache when offline
   if (url.hostname.includes('catastospeleologicoregionale.sardegna.it')) {
     event.respondWith((async () => {
       const cache = await caches.open(DOC_CACHE);
-      const matchOpts = { ignoreSearch: true, ignoreVary: true, ignoreMethod: false };
+      const matchOpts = { ignoreSearch: true, ignoreVary: true };
       const findCached = async () =>
         (await cache.match(req, matchOpts)) ||
         (await cache.match(url.href, matchOpts)) ||
         (await cache.match(url.origin + url.pathname, matchOpts));
 
-      // Offline: only cache
       if (!self.navigator.onLine) {
         const cached = await findCached();
         if (cached) return cached;
         return new Response(
-          '<!DOCTYPE html><html><body style="font-family:sans-serif;padding:24px;background:#111;color:#eee"><h3>Documento non in cache</h3><p>Apri questo documento almeno una volta con connessione, poi riprova offline.</p></body></html>',
+          '<!DOCTYPE html><html><body style="font-family:sans-serif;padding:24px;background:#111;color:#eee"><h3>Documento non in cache</h3><p>Apri questo documento online almeno una volta.</p></body></html>',
           { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } }
         );
       }
-
       try {
         const res = await fetch(req, { redirect: 'follow', credentials: 'omit' });
         if (res && (res.ok || res.type === 'opaque')) {
           try { await cache.put(req, res.clone()); } catch (e) {}
           try { await cache.put(url.href, res.clone()); } catch (e) {}
-          try { await cache.put(url.origin + url.pathname, res.clone()); } catch (e) {}
         }
         return res;
       } catch (e) {
         const cached = await findCached();
         if (cached) return cached;
-        return new Response(
-          '<!DOCTYPE html><html><body style="font-family:sans-serif;padding:24px;background:#111;color:#eee"><h3>Documento non disponibile offline</h3><p>Apri questo documento online almeno una volta.</p></body></html>',
-          { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } }
-        );
+        return new Response('Offline', { status: 503 });
       }
     })());
     return;
   }
 
   if (url.origin === self.location.origin) {
+    // Cache-first for app shell (works offline)
     event.respondWith(
       caches.match(req).then(cached => {
         const net = fetch(req).then(res => {

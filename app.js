@@ -592,7 +592,7 @@ function draw(feats){
 
 
 
-const DOC_CACHE_NAME = 'csr-docs-v95';
+const DOC_CACHE_NAME = 'csr-docs-v96';
 let docZoom = 1;
 let docPinch = null;
 let docCurrentUrl = null;
@@ -949,7 +949,7 @@ async function openCsrDoc(url, title, opts) {
 
   const bar = document.getElementById('docMeasureBar');
   const list = document.getElementById('docMeasureList');
-  if (bar) bar.style.display = docIsRilievo ? 'flex' : 'none';
+  if (bar) { bar.style.display = docIsRilievo ? 'flex' : 'none'; bar.style.flexWrap = 'wrap'; }
   if (list) list.style.display = 'none';
 
   if (docIsRilievo && docCurrentCodice) {
@@ -1103,8 +1103,12 @@ function openCard(f){
       const cls = d.key === 'scheda' ? 'ba' : 'bb';
       const ready = isDocMarkedReady(codice, d.key);
       const label = d.label + (ready ? ' ✓' : '');
-      // Pure links: most reliable on iOS Safari / PWA
-      docs += `<a class="${cls}" href="${d.url}" target="_blank" rel="noopener noreferrer" data-csr-key="${d.key}" data-csr-title="${d.label}" style="${ready ? 'box-shadow:inset 0 0 0 1px #3dcfb0' : ''}">${label}</a>`;
+      if (d.key === 'rilievo') {
+        // Button → in-app viewer with measure tools
+        docs += `<button type="button" class="${cls}" id="btnRilievo" data-url="${d.url}" style="${ready ? 'box-shadow:inset 0 0 0 1px #3dcfb0' : ''}">${label}</button>`;
+      } else {
+        docs += `<a class="${cls}" href="${d.url}" target="_blank" rel="noopener noreferrer" data-csr-key="${d.key}" style="${ready ? 'box-shadow:inset 0 0 0 1px #3dcfb0' : ''}">${label}</a>`;
+      }
     });
   } else {
     docs += `<span class="bc" style="opacity:.7">Documenti non disponibili (manca n. catastale)</span>`;
@@ -1116,25 +1120,29 @@ function openCard(f){
     `<button type="button" class="bc" id="saveBtn">${isFav(p.id_ost) ? '★  Salvata offline' : '○  Salva offline'}</button>`;
   const cardEl = document.getElementById('card');
   cardEl.classList.add('open');
-  // stop map from eating touches on the card
   cardEl.onclick = e => e.stopPropagation();
   cardEl.ontouchstart = e => e.stopPropagation();
 
   document.getElementById('saveBtn').onclick = e => { e.preventDefault(); e.stopPropagation(); toggleFav(f); };
   document.getElementById('expBtn').onclick = e => { e.preventDefault(); e.stopPropagation(); toggleExplored(f); };
 
-  // After opening a doc link, mark ready when user returns (and try cache)
+  const btnRil = document.getElementById('btnRilievo');
+  if (btnRil) {
+    btnRil.onclick = e => {
+      e.preventDefault();
+      e.stopPropagation();
+      const url = btnRil.dataset.url;
+      openCsrDoc(url, 'Rilievo PDF', { codice: codice || p.codice, isRilievo: true, docKey: 'rilievo' });
+    };
+  }
   document.querySelectorAll('#cardActions a[data-csr-key]').forEach(a => {
     a.addEventListener('click', () => {
       const key = a.dataset.csrKey;
       const url = a.href;
-      // do NOT preventDefault — let the browser open the link
       setTimeout(() => {
         if (codice && key) {
           markDocReady(codice, key);
-          try {
-            caches.open(DOC_CACHE_NAME).then(c => c.add(url).catch(() => {}));
-          } catch (err) {}
+          try { caches.open(DOC_CACHE_NAME).then(c => c.add(url).catch(() => {})); } catch (err) {}
           updateDocReadyLabels(codice);
         }
       }, 1500);
@@ -2208,13 +2216,24 @@ async function init(){
 
     try{
     let g = null;
-    try {
-      const r = await fetch('grotte_sardegna.geojson');
-      if (r && r.ok) g = await r.json();
-    } catch (e1) {}
+    // Offline: prefer Cache API first
+    if (!navigator.onLine && 'caches' in window) {
+      try {
+        const cached = await caches.match('./grotte_sardegna.geojson') || await caches.match('grotte_sardegna.geojson');
+        if (cached) g = await cached.json();
+      } catch (e0) {}
+    }
+    if (!g) {
+      try {
+        const r = await fetch('grotte_sardegna.geojson');
+        if (r && r.ok) g = await r.json();
+      } catch (e1) {}
+    }
     if (!g && 'caches' in window) {
-      const cached = await caches.match('grotte_sardegna.geojson') || await caches.match('./grotte_sardegna.geojson');
-      if (cached) g = await cached.json();
+      try {
+        const cached = await caches.match('./grotte_sardegna.geojson') || await caches.match('grotte_sardegna.geojson');
+        if (cached) g = await cached.json();
+      } catch (e2) {}
     }
     if (!g) throw new Error('nessun dato in cache');
     all = g.features || [];
@@ -2233,7 +2252,6 @@ async function init(){
     status('Errore dati');
     showError('Impossibile caricare le grotte offline. Apri l\'app online una volta per scaricarle.');
     console.error(e);
-    // still allow favorites list
   }
 
   if('serviceWorker' in navigator){try{await navigator.serviceWorker.register('sw.js');}catch(e){}}
