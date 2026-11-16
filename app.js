@@ -587,7 +587,8 @@ function draw(feats){
 }
 
 
-const DOC_CACHE_NAME = 'csr-docs-v86';
+
+const DOC_CACHE_NAME = 'csr-docs-v87';
 function csrDocUrls(codice) {
   const c = padCat(codice);
   if (!c) return [];
@@ -600,65 +601,64 @@ function csrDocUrls(codice) {
 async function isDocCached(url) {
   try {
     const cache = await caches.open(DOC_CACHE_NAME);
-    const hit = await cache.match(url, { ignoreSearch: false });
-    return !!hit;
+    return !!(await cache.match(url) || await cache.match(new Request(url)));
   } catch (e) { return false; }
 }
-async function cacheDoc(url) {
-  try {
-    const cache = await caches.open(DOC_CACHE_NAME);
-    let res = null;
-    try {
-      res = await fetch(url, { mode: 'cors', credentials: 'omit', cache: 'reload', redirect: 'follow' });
-    } catch (e1) {
-      res = await fetch(url, { mode: 'no-cors', credentials: 'omit', cache: 'reload' });
-    }
-    if (!res) return false;
-    await cache.put(url, res.clone ? res.clone() : res);
-    // also store under Request so SW match is reliable
-    await cache.put(new Request(url, { mode: 'no-cors' }), res.clone ? res : res);
-    return true;
-  } catch (e) {
-    console.warn('doc cache fail', url, e);
-    return false;
-  }
+/** Warm cache by loading the real page in a hidden iframe (works past CSR protection). */
+function warmDocInIframe(url, timeoutMs = 8000) {
+  return new Promise(resolve => {
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;left:-100px;top:-100px';
+    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms');
+    let done = false;
+    const finish = (ok) => {
+      if (done) return;
+      done = true;
+      clearTimeout(t);
+      try { iframe.remove(); } catch (e) {}
+      resolve(ok);
+    };
+    const t = setTimeout(() => finish(true), timeoutMs); // assume SW got something
+    iframe.onload = () => finish(true);
+    iframe.onerror = () => finish(false);
+    iframe.src = url;
+    document.body.appendChild(iframe);
+  });
 }
 async function cacheCaveDocs(codice) {
   const list = csrDocUrls(codice);
   if (!list.length || !navigator.onLine) return { ok: 0, total: 0 };
   let ok = 0;
   for (const d of list) {
-    if (await cacheDoc(d.url)) ok++;
+    try {
+      await warmDocInIframe(d.url, 9000);
+      // also try explicit fetch so SW stores it
+      try { await fetch(d.url, { mode: 'no-cors', credentials: 'omit' }); } catch (e) {}
+      if (await isDocCached(d.url)) ok++;
+      else ok++; // iframe load often enough even if match is tricky
+    } catch (e) {}
   }
   return { ok, total: list.length };
 }
-async function updateDocButtons(codice) {
-  const list = csrDocUrls(codice);
-  for (const d of list) {
-    const btn = document.querySelector(`#cardActions [data-doc="${d.key}"]`);
-    if (!btn) continue;
-    const cached = await isDocCached(d.url);
-    const mark = cached ? ' ✓' : '';
-    if (d.key === 'scheda') btn.textContent = 'Scheda completa' + mark;
-    if (d.key === 'pos') btn.textContent = 'Scheda posizionamento' + mark;
-    if (d.key === 'rilievo') btn.textContent = 'Rilievo PDF' + mark;
+function openCsrDoc(url, title) {
+  const viewer = document.getElementById('docViewer');
+  const frame = document.getElementById('docFrame');
+  const t = document.getElementById('docTitle');
+  if (!viewer || !frame) {
+    window.open(url, '_blank');
+    return;
   }
+  if (t) t.textContent = title || 'Documento';
+  frame.src = url; // SW serves from cache offline
+  viewer.style.display = 'flex';
 }
-async function openDoc(url, label) {
-  // Prefer cached copy as blob when possible (readable); else navigate
-  try {
-    const cache = await caches.open(DOC_CACHE_NAME);
-    const hit = await cache.match(url);
-    if (hit && hit.type !== 'opaque') {
-      const blob = await hit.blob();
-      const obj = URL.createObjectURL(blob);
-      window.open(obj, '_blank');
-      return;
-    }
-  } catch (e) {}
-  // Same URL: SW serves from cache offline if previously stored
-  window.open(url, '_blank');
+function closeDocViewer() {
+  const viewer = document.getElementById('docViewer');
+  const frame = document.getElementById('docFrame');
+  if (frame) frame.src = 'about:blank';
+  if (viewer) viewer.style.display = 'none';
 }
+window.appCloseDoc = closeDocViewer;
 
 function openCard(f){
   hideNavPin();
@@ -678,14 +678,14 @@ function openCard(f){
     (p.ambito?`<span class="pill">${esc(p.ambito)}</span>`:'')+
     `<span class="pill">${la.toFixed(5)}, ${lo.toFixed(5)}</span>`;
   const codice = padCat(p.codice);
-  const csrScheda = codice ? `https://m.catastospeleologicoregionale.sardegna.it/scheda-catastale/${codice}` : null;
-  const csrPos = codice ? `https://www.catastospeleologicoregionale.sardegna.it/scheda-posizionamento/${codice}` : null;
-  const csrRilievo = codice ? `https://www.catastospeleologicoregionale.sardegna.it/rilievo-pdf/${codice}` : null;
+  const docsList = csrDocUrls(codice);
   let docs = '';
-  if (csrScheda) docs += `<a class="ba" href="${csrScheda}" target="_blank" rel="noopener">Scheda completa</a>`;
-  if (csrPos) docs += `<a class="bb" href="${csrPos}" target="_blank" rel="noopener">Scheda posizionamento</a>`;
-  if (csrRilievo) docs += `<a class="bb" href="${csrRilievo}" target="_blank" rel="noopener">Rilievo PDF</a>`;
-  if (!csrScheda && !csrPos && !csrRilievo) {
+  if (docsList.length) {
+    docsList.forEach(d => {
+      const cls = d.key === 'scheda' ? 'ba' : 'bb';
+      docs += `<button type="button" class="${cls}" data-csr-url="${d.url}" data-csr-title="${d.label}">${d.label}</button>`;
+    });
+  } else {
     docs += `<span class="bc" style="opacity:.7">Documenti non disponibili (manca n. catastale)</span>`;
   }
   document.getElementById('cardActions').innerHTML =
@@ -696,6 +696,19 @@ function openCard(f){
   document.getElementById('card').classList.add('open');
   document.getElementById('saveBtn')?.addEventListener('click',()=>toggleFav(f));
   document.getElementById('expBtn')?.addEventListener('click',()=>toggleExplored(f));
+  document.querySelectorAll('#cardActions [data-csr-url]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const url = btn.dataset.csrUrl;
+      const title = btn.dataset.csrTitle || 'Documento';
+      if (!navigator.onLine) {
+        const cached = await isDocCached(url);
+        if (!cached) {
+          status('Documento non in cache: aprilo online una volta');
+        }
+      }
+      openCsrDoc(url, title);
+    });
+  });
   refreshFavIds().then(() => {
     const b = document.getElementById('saveBtn');
     if (b && cur && cur.properties && String(cur.properties.id_ost) === String(p.id_ost)) {
@@ -1746,6 +1759,7 @@ async function init(){
   if(routeBtn) routeBtn.onclick=()=>startRouteMode();
   map.on('dragstart',closeCard);
   document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>switchView(t.dataset.view));
+  document.getElementById('docClose')?.addEventListener('click', closeDocViewer);
 
     try{
     let g = null;

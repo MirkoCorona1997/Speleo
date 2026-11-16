@@ -279,9 +279,16 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,"S
 </style>
 </head>
 <body>
-<div class="ver">v8.6</div>
+<div class="ver">v8.7</div>
 <div class="offline" id="offlineBadge">OFFLINE</div>
 <div class="errbox" id="errbox"></div>
+<div id="docViewer" style="display:none;position:fixed;inset:0;z-index:5000;background:#0b1220;flex-direction:column">
+  <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;padding-top:calc(10px + var(--safe-t));background:#151c2c;border-bottom:1px solid var(--line)">
+    <button type="button" id="docClose" style="height:36px;padding:0 12px;border:none;border-radius:10px;background:#243044;color:#fff;font-weight:700">Chiudi</button>
+    <div id="docTitle" style="flex:1;font-size:14px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Documento</div>
+  </div>
+  <iframe id="docFrame" title="Documento" style="flex:1;width:100%;border:0;background:#fff"></iframe>
+</div>
 
 <div class="view active" id="view-map">
   <div id="map"></div>
