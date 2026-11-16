@@ -793,9 +793,10 @@ function resizeMeasureSvg() {
   const wrap = document.getElementById('docZoomWrap');
   const hit = document.getElementById('docMeasureHit');
   const img = document.getElementById('docImg');
+  const canvas = document.getElementById('docPdfCanvas');
   if (!svg || !wrap) return;
-  const w = Math.max(wrap.scrollWidth || 0, wrap.offsetWidth || 0, img?.offsetWidth || 0, 1);
-  const h = Math.max(wrap.scrollHeight || 0, wrap.offsetHeight || 0, img?.offsetHeight || 0, 400);
+  const w = Math.max(wrap.scrollWidth || 0, wrap.offsetWidth || 0, img?.offsetWidth || 0, canvas?.offsetWidth || 0, 1);
+  const h = Math.max(wrap.scrollHeight || 0, wrap.offsetHeight || 0, img?.offsetHeight || 0, canvas?.offsetHeight || 0, 400);
   svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
   svg.style.width = w + 'px';
   svg.style.height = h + 'px';
@@ -980,6 +981,65 @@ function onMeasureEnd(e) {
   redrawMeasures();
 }
 
+
+let pdfDoc = null;
+let pdfPageNum = 1;
+let pdfRenderScale = 1.5;
+let pdfRendering = false;
+
+function setupPdfJs() {
+  if (window.pdfjsLib) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdf.worker.min.js';
+  }
+}
+
+async function renderPdfPage() {
+  const canvas = document.getElementById('docPdfCanvas');
+  const img = document.getElementById('docImg');
+  const empty = document.getElementById('docImgEmpty');
+  if (!pdfDoc || !canvas) return;
+  if (pdfRendering) return;
+  pdfRendering = true;
+  try {
+    const page = await pdfDoc.getPage(pdfPageNum);
+    // High-res base scale for crisp zoom
+    const base = pdfRenderScale * (window.devicePixelRatio || 1);
+    const viewport = page.getViewport({ scale: base });
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    canvas.style.width = '100%';
+    canvas.style.height = 'auto';
+    canvas.style.display = 'block';
+    if (img) img.style.display = 'none';
+    if (empty) empty.style.display = 'none';
+    const ctx = canvas.getContext('2d');
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    requestAnimationFrame(() => {
+      applyDocZoom();
+      resizeMeasureSvg();
+      redrawMeasures();
+    });
+  } catch (e) {
+    console.error(e);
+    status('Errore rendering PDF');
+  }
+  pdfRendering = false;
+}
+
+async function loadPdfFromBlob(blob) {
+  setupPdfJs();
+  if (!window.pdfjsLib) {
+    status('pdf.js non disponibile');
+    return false;
+  }
+  const data = await blob.arrayBuffer();
+  pdfDoc = await pdfjsLib.getDocument({ data }).promise;
+  pdfPageNum = 1;
+  await renderPdfPage();
+  status('PDF caricato — ' + pdfDoc.numPages + ' pag.');
+  return true;
+}
+
 async function openCsrDoc(url, title, opts) {
   opts = opts || {};
   // For plain docs (not measure workspace), open externally
@@ -1022,27 +1082,33 @@ async function openMeasureWorkspace(pdfUrl, codice) {
   measureDraft = null;
   setMeasureMode('pan');
 
-  // Load saved screenshot if any
-  img.onload = () => {
-    if (empty) empty.style.display = 'none';
-    img.style.display = 'block';
-    requestAnimationFrame(() => {
-      applyDocZoom();
-      resizeMeasureSvg();
-      redrawMeasures();
-    });
-  };
+  // Load saved PDF/image if any
+  const canvas = document.getElementById('docPdfCanvas');
+  if (canvas) canvas.style.display = 'none';
+  if (img) { img.removeAttribute('src'); img.style.display = 'none'; }
   const blob = docCurrentCodice ? await loadRilievoImage(docCurrentCodice) : null;
   if (blob) {
-    if (empty) empty.style.display = 'none';
-    img.style.display = 'block';
-    img.src = URL.createObjectURL(blob);
-    status('Rilievo offline caricato');
+    const type = blob.type || '';
+    if (type.includes('pdf') || type === 'application/octet-stream' || (blob.name && /\.pdf$/i.test(blob.name))) {
+      await loadPdfFromBlob(blob);
+      status('PDF offline caricato');
+    } else {
+      if (empty) empty.style.display = 'none';
+      if (img) {
+        img.onload = () => {
+          img.style.display = 'block';
+          applyDocZoom();
+          resizeMeasureSvg();
+          redrawMeasures();
+        };
+        img.src = URL.createObjectURL(blob);
+        img.style.display = 'block';
+      }
+      status('Rilievo offline caricato');
+    }
   } else {
-    img.removeAttribute('src');
-    img.style.display = 'none';
     if (empty) empty.style.display = 'block';
-    status('Importa uno screenshot del rilievo');
+    status('Importa il PDF del rilievo');
   }
   requestAnimationFrame(() => { applyDocZoom(); resizeMeasureSvg(); redrawMeasures(); });
 }
@@ -1072,24 +1138,37 @@ function initDocViewerUI() {
   document.getElementById('docImgInput')?.addEventListener('change', async ev => {
     const file = ev.target.files && ev.target.files[0];
     if (!file) return;
-    const img = document.getElementById('docImg');
     const empty = document.getElementById('docImgEmpty');
-    const url = URL.createObjectURL(file);
-    if (img) {
-      img.onload = () => {
-        if (empty) empty.style.display = 'none';
-        img.style.display = 'block';
-        applyDocZoom();
-        resizeMeasureSvg();
-        redrawMeasures();
-      };
-      img.src = url;
+    const img = document.getElementById('docImg');
+    const isPdf = (file.type === 'application/pdf') || /\.pdf$/i.test(file.name || '');
+    if (empty) empty.style.display = 'none';
+    if (isPdf) {
+      try {
+        await loadPdfFromBlob(file);
+      } catch (err) {
+        console.error(err);
+        status('PDF non leggibile');
+        ev.target.value = '';
+        return;
+      }
+    } else {
+      const canvas = document.getElementById('docPdfCanvas');
+      if (canvas) canvas.style.display = 'none';
+      if (img) {
+        img.onload = () => {
+          img.style.display = 'block';
+          applyDocZoom();
+          resizeMeasureSvg();
+          redrawMeasures();
+        };
+        img.src = URL.createObjectURL(file);
+      }
     }
     if (docCurrentCodice) {
       const ok = await saveRilievoImage(docCurrentCodice, file);
-      status(ok ? 'Screenshot salvato offline ✓' : 'Immagine caricata (non salvata in DB)');
+      status(ok ? (isPdf ? 'PDF salvato offline ✓' : 'Foto salvata offline ✓') : 'File caricato');
     } else {
-      status('Screenshot caricato');
+      status(isPdf ? 'PDF caricato' : 'Foto caricata');
     }
     ev.target.value = '';
   });
@@ -2287,6 +2366,7 @@ async function init(){
   if(routeBtn) routeBtn.onclick=()=>startRouteMode();
   map.on('dragstart',closeCard);
   document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>switchView(t.dataset.view));
+  setupPdfJs();
   initDocViewerUI();
 
     // Register SW early so offline works next launch

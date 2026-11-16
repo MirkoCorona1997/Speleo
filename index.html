@@ -293,7 +293,7 @@ html,body{
 </style>
 </head>
 <body>
-<div class="ver">v9.9</div>
+<div class="ver">v10.0</div>
 <div class="offline" id="offlineBadge">OFFLINE</div>
 <div class="errbox" id="errbox"></div>
 <div id="docViewer" style="display:none;position:fixed;inset:0;z-index:5000;background:#0b1220;flex-direction:column;height:100%;height:100dvh">
@@ -307,29 +307,30 @@ html,body{
   </div>
   <div id="docMeasureBar" style="display:none;gap:6px;padding:8px 10px;background:#121826;border-bottom:1px solid var(--line);flex-wrap:wrap;align-items:center">
     <button type="button" class="docm-btn" id="btnOpenPdf" style="height:34px;padding:0 10px;border:none;border-radius:10px;background:#3b9eff;color:#fff;font-weight:800;font-size:12px">Apri PDF</button>
-    <button type="button" class="docm-btn" id="btnImportImg" style="height:34px;padding:0 10px;border:none;border-radius:10px;background:#3dcfb0;color:#08221c;font-weight:800;font-size:12px">Importa foto</button>
+    <button type="button" class="docm-btn" id="btnImportImg" style="height:34px;padding:0 10px;border:none;border-radius:10px;background:#3dcfb0;color:#08221c;font-weight:800;font-size:12px">Importa PDF</button>
     <button type="button" class="docm-btn" id="btnCalibrate" style="height:34px;padding:0 10px;border:none;border-radius:10px;background:#243044;color:#fff;font-weight:700;font-size:12px">Scala</button>
     <button type="button" class="docm-btn" id="btnMeasure" style="height:34px;padding:0 10px;border:none;border-radius:10px;background:#243044;color:#fff;font-weight:700;font-size:12px">Misura</button>
     <button type="button" class="docm-btn" id="btnMeasurePan" style="height:34px;padding:0 10px;border:none;border-radius:10px;background:#243044;color:#fff;font-weight:700;font-size:12px">Scorri</button>
     <button type="button" class="docm-btn" id="btnMeasureUndo" style="height:34px;padding:0 10px;border:none;border-radius:10px;background:#243044;color:#fff;font-weight:700;font-size:12px">Annulla</button>
     <button type="button" class="docm-btn" id="btnMeasureClear" style="height:34px;padding:0 10px;border:none;border-radius:10px;background:#5a2030;color:#fff;font-weight:700;font-size:12px">Cancella</button>
-    <span id="docMeasureInfo" style="font-size:12px;color:#9aa4b8;margin-left:4px">Importa uno screenshot del rilievo</span>
+    <span id="docMeasureInfo" style="font-size:12px;color:#9aa4b8;margin-left:4px">Importa il PDF del rilievo</span>
   </div>
   <div id="docScroll" style="flex:1;min-height:0;overflow:auto;-webkit-overflow-scrolling:touch;background:#1a1a1a;position:relative;touch-action:pan-x pan-y">
     <div id="docZoomWrap" style="transform-origin:0 0;width:100%;min-height:100%;position:relative">
       <img id="docImg" alt="Rilievo" style="width:100%;height:auto;display:block;background:#111;min-height:200px"/>
       <div id="docImgEmpty" style="display:none;padding:40px 20px;text-align:center;color:#9aa4b8;font-size:14px;line-height:1.5">
         <p style="margin-bottom:12px"><strong>Come fare</strong></p>
-        <p style="margin-bottom:8px">1. Tocca <b>Apri PDF</b> e fai uno screenshot del rilievo</p>
-        <p style="margin-bottom:8px">2. Torna qui e tocca <b>Importa foto</b></p>
-        <p style="margin-bottom:8px">3. Imposta la <b>Scala</b> e misura offline</p>
+        <p style="margin-bottom:8px">1. Scarica/apri il rilievo (Apri PDF) e salvalo in File</p>
+        <p style="margin-bottom:8px">2. Tocca <b>Importa PDF</b> e scegli il file</p>
+        <p style="margin-bottom:8px">3. Zoom con +/−, imposta <b>Scala</b> e misura</p>
       </div>
+      <canvas id="docPdfCanvas" style="width:100%;height:auto;display:none;background:#fff"></canvas>
       <svg id="docMeasureSvg" style="position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:2"></svg>
       <div id="docMeasureHit" style="position:absolute;left:0;top:0;width:100%;height:100%;z-index:3;display:none;touch-action:none"></div>
     </div>
   </div>
   <div id="docMeasureList" style="display:none;max-height:22vh;overflow:auto;background:#121826;border-top:1px solid var(--line);padding:6px 10px;padding-bottom:calc(6px + var(--safe-b))"></div>
-  <input type="file" id="docImgInput" accept="image/*" style="display:none"/>
+  <input type="file" id="docImgInput" accept="application/pdf,image/*,.pdf" style="display:none"/>
 </div>
 
 <div class="view active" id="view-map">
@@ -497,6 +498,7 @@ html,body{
 </nav>
 
 <script src="leaflet.js"></script>
+<script src="pdf.min.js"></script>
 <script src="app.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function(){

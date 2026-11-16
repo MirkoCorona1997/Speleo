@@ -1,6 +1,6 @@
-const CACHE_NAME = 'csr-grotte-v99';
-const TILE_CACHE = 'csr-tiles-v99';
-const DOC_CACHE = 'csr-docs-v99';
+const CACHE_NAME = 'csr-grotte-v100';
+const TILE_CACHE = 'csr-tiles-v100';
+const DOC_CACHE = 'csr-docs-v100';
 const APP_ASSETS = [
   './',
   './index.html',
@@ -14,7 +14,9 @@ const APP_ASSETS = [
   './icon-512.png',
   './images/marker-icon.png',
   './images/marker-icon-2x.png',
-  './images/marker-shadow.png'
+  './images/marker-shadow.png',
+  './pdf.min.js',
+  './pdf.worker.min.js'
 ];
 
 const TILE_HOSTS = [
