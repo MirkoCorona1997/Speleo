@@ -592,11 +592,12 @@ function draw(feats){
 
 
 
-const DOC_CACHE_NAME = 'csr-docs-v90';
+const DOC_CACHE_NAME = 'csr-docs-v93';
 let docZoom = 1;
 let docPinch = null;
 let docCurrentUrl = null;
 let docCurrentCodice = null;
+let docCurrentKey = null;
 let docIsRilievo = false;
 let measureMode = 'pan'; // pan | calibrate | measure
 let measureScale = null; // meters per pixel at zoom 1 content coords
@@ -619,6 +620,65 @@ async function isDocCached(url) {
     const opts = { ignoreSearch: true, ignoreVary: true };
     return !!(await cache.match(url, opts) || await cache.match(new Request(url), opts));
   } catch (e) { return false; }
+}
+function docReadyKey(codice, key) {
+  return 'csr-doc-ready-' + padCat(codice) + '-' + key;
+}
+function isDocMarkedReady(codice, key) {
+  if (!codice || !key) return false;
+  return localStorage.getItem(docReadyKey(codice, key)) === '1';
+}
+function markDocReady(codice, key) {
+  if (!codice || !key) return;
+  localStorage.setItem(docReadyKey(codice, key), '1');
+}
+async function ensureDocCached(url, codice, key) {
+  try {
+    const cache = await caches.open(DOC_CACHE_NAME);
+    // Prefer navigation-style request (better chance vs CSR protection)
+    try {
+      const res = await fetch(url, { credentials: 'omit', redirect: 'follow', mode: 'no-cors' });
+      await cache.put(url, res.clone ? res.clone() : res);
+    } catch (e1) {
+      await cache.add(url).catch(() => null);
+    }
+    // hidden iframe warm-up (real browser request, SW can store)
+    await warmDocInIframe(url, 8000);
+    const ok = await isDocCached(url);
+    if (ok || navigator.onLine) {
+      // Mark ready if we at least completed an online open cycle
+      markDocReady(codice, key);
+      return true;
+    }
+    return ok;
+  } catch (e) {
+    return false;
+  }
+}
+async function updateDocReadyLabels(codice) {
+  const list = csrDocUrls(codice);
+  let ready = 0;
+  for (const d of list) {
+    const a = document.querySelector(`#cardActions [data-csr-key="${d.key}"]`);
+    if (!a) continue;
+    const cached = isDocMarkedReady(codice, d.key) || await isDocCached(d.url);
+    if (cached) {
+      ready++;
+      markDocReady(codice, d.key);
+      if (!/✓/.test(a.textContent)) a.textContent = d.label + ' ✓';
+      a.style.boxShadow = 'inset 0 0 0 1px #3dcfb0';
+    } else {
+      a.textContent = d.label;
+      a.style.boxShadow = '';
+    }
+  }
+  const info = document.getElementById('docReadyInfo');
+  if (info) {
+    if (!list.length) info.textContent = '';
+    else if (ready === list.length) info.textContent = 'Documenti offline: tutti pronti ✓';
+    else info.textContent = `Documenti offline: ${ready}/${list.length} pronti — apri quelli senza ✓`;
+  }
+  return ready;
 }
 function applyDocZoom() {
   const wrap = document.getElementById('docZoomWrap');
@@ -882,10 +942,12 @@ async function openCsrDoc(url, title, opts) {
   const viewer = document.getElementById('docViewer');
   const frame = document.getElementById('docFrame');
   const tEl = document.getElementById('docTitle');
-  if (!viewer || !frame) { window.open(url, '_blank'); return; }
+  if (!viewer || !frame) { window.open(url, '_blank', 'noopener'); return; }
   if (tEl) tEl.textContent = title || 'Documento';
+  viewer.style.zIndex = '6000';
   docCurrentUrl = url;
   docCurrentCodice = opts.codice ? padCat(opts.codice) : (cur && cur.properties ? padCat(cur.properties.codice) : null);
+  docCurrentKey = opts.docKey || (opts.isRilievo || /rilievo/i.test(title||'') ? 'rilievo' : (/posizionamento/i.test(title||'') ? 'pos' : 'scheda'));
   docIsRilievo = !!(opts.isRilievo || (title && /rilievo/i.test(title)) || /rilievo-pdf/i.test(url));
   docZoom = 1;
   applyDocZoom();
@@ -924,17 +986,29 @@ async function openCsrDoc(url, title, opts) {
     const onLoad = async () => {
       frame.removeEventListener('load', onLoad);
       try {
-        const cache = await caches.open(DOC_CACHE_NAME);
-        await cache.add(url).catch(() => null);
+        await ensureDocCached(url, docCurrentCodice, docCurrentKey);
       } catch (e) {}
+      if (docCurrentCodice && docCurrentKey) {
+        markDocReady(docCurrentCodice, docCurrentKey);
+        status((title || 'Documento') + ' pronto offline ✓');
+        updateDocReadyLabels(docCurrentCodice);
+      }
       applyDocZoom();
       resizeMeasureSvg();
       redrawMeasures();
     };
     frame.addEventListener('load', onLoad);
+    // safety mark after 4s online view
+    setTimeout(async () => {
+      if (!navigator.onLine || !docCurrentCodice || !docCurrentKey) return;
+      await ensureDocCached(url, docCurrentCodice, docCurrentKey);
+      markDocReady(docCurrentCodice, docCurrentKey);
+      updateDocReadyLabels(docCurrentCodice);
+    }, 4000);
   } else {
-    const cached = await isDocCached(url);
+    const cached = await isDocCached(url) || isDocMarkedReady(docCurrentCodice, docCurrentKey);
     if (!cached) status('Non in cache: aprilo online almeno una volta');
+    else status('Apertura da cache offline');
   }
 }
 function closeDocViewer() {
@@ -951,6 +1025,9 @@ window.appCloseDoc = closeDocViewer;
 
 function initDocViewerUI() {
   document.getElementById('docClose')?.addEventListener('click', closeDocViewer);
+  document.getElementById('docOpenExt')?.addEventListener('click', () => {
+    if (docCurrentUrl) window.open(docCurrentUrl, '_blank', 'noopener');
+  });
   document.getElementById('docZoomIn')?.addEventListener('click', () => { docZoom += 0.25; applyDocZoom(); });
   document.getElementById('docZoomOut')?.addEventListener('click', () => { docZoom -= 0.25; applyDocZoom(); });
   document.getElementById('docZoomReset')?.addEventListener('click', () => { docZoom = 1; applyDocZoom(); });
@@ -1030,8 +1107,11 @@ function openCard(f){
   if (docsList.length) {
     docsList.forEach(d => {
       const cls = d.key === 'scheda' ? 'ba' : 'bb';
-      docs += `<button type="button" class="${cls}" data-csr-url="${d.url}" data-csr-title="${d.label}">${d.label}</button>`;
+      const ready = isDocMarkedReady(codice, d.key);
+      const label = d.label + (ready ? ' ✓' : '');
+      docs += `<a class="${cls}" href="${d.url}" target="_blank" rel="noopener" data-csr-url="${d.url}" data-csr-title="${d.label}" data-csr-key="${d.key}" style="${ready ? 'box-shadow:inset 0 0 0 1px #3dcfb0' : ''}">${label}</a>`;
     });
+    docs += `<div id="docReadyInfo" class="bc" style="grid-column:1/-1;text-align:center;opacity:.9;font-size:11px!important;height:auto!important;padding:4px 0">Documenti offline: …</div>`;
   } else {
     docs += `<span class="bc" style="opacity:.7">Documenti non disponibili (manca n. catastale)</span>`;
   }
@@ -1043,22 +1123,21 @@ function openCard(f){
   document.getElementById('card').classList.add('open');
   document.getElementById('saveBtn')?.addEventListener('click',()=>toggleFav(f));
   document.getElementById('expBtn')?.addEventListener('click',()=>toggleExplored(f));
-  document.querySelectorAll('#cardActions [data-csr-url]').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const url = btn.dataset.csrUrl;
-      const title = btn.dataset.csrTitle || 'Documento';
-      if (!navigator.onLine) {
-        const cached = await isDocCached(url);
-        if (!cached) {
-          status('Documento non in cache: aprilo online una volta');
-        }
-      }
+  document.querySelectorAll('#cardActions [data-csr-url]').forEach(a => {
+    a.addEventListener('click', e => {
+      e.preventDefault();
+      const url = a.getAttribute('href') || a.dataset.csrUrl;
+      const title = a.dataset.csrTitle || 'Documento';
+      const key = a.dataset.csrKey || '';
+      const isRilievo = key === 'rilievo' || /rilievo/i.test(title) || /rilievo-pdf/i.test(url);
       openCsrDoc(url, title, {
         codice: codice || p.codice,
-        isRilievo: /rilievo/i.test(title) || /rilievo-pdf/i.test(url)
+        isRilievo,
+        docKey: key
       });
     });
   });
+  if (codice) updateDocReadyLabels(codice);
   refreshFavIds().then(() => {
     const b = document.getElementById('saveBtn');
     if (b && cur && cur.properties && String(cur.properties.id_ost) === String(p.id_ost)) {

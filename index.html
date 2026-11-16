@@ -19,12 +19,12 @@
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{
-  height:100%;height:100dvh;width:100%;
+  height:100%;height:100dvh;min-height:100%;min-height:100dvh;width:100%;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-  background:var(--bg);color:var(--text);overflow:hidden;position:fixed;
+  background:var(--panel);color:var(--text);overflow:hidden;position:fixed;
   overscroll-behavior:none;
 }
-.view{position:absolute;top:0;left:0;right:0;bottom:var(--tab);display:none}
+.view{position:absolute;top:0;left:0;right:0;bottom:calc(var(--tab) + var(--safe-b));display:none;background:var(--bg)}
 .view.active{display:block}
 #map{position:absolute;top:0;left:0;right:0;bottom:0;width:100%;height:100%;background:#1a2332;z-index:1}
 
@@ -128,15 +128,15 @@ html,body{
 .tabs{
   position:fixed;bottom:0;left:0;right:0;z-index:2000;
   height:calc(var(--tab) + var(--safe-b));
-  padding:0;padding-bottom:var(--safe-b);
+  padding-bottom:var(--safe-b);
   background:var(--panel);border-top:1px solid var(--line);display:flex;
-  align-items:stretch;
+  align-items:flex-start;
   box-sizing:border-box;
 }
 .tab{
   flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
-  gap:2px;background:none;border:none;color:var(--muted);font-size:10px;font-weight:700;cursor:pointer;
-  height:var(--tab);padding:0;margin:0;
+  gap:1px;background:none;border:none;color:var(--muted);font-size:10px;font-weight:700;cursor:pointer;
+  height:var(--tab);padding:4px 0 0;margin:0;
 }
 .tab.on{color:var(--accent)}
 .tab .i{font-size:20px}
@@ -288,7 +288,7 @@ html,body{
 </style>
 </head>
 <body>
-<div class="ver">v9.1</div>
+<div class="ver">v9.3</div>
 <div class="offline" id="offlineBadge">OFFLINE</div>
 <div class="errbox" id="errbox"></div>
 <div id="docViewer" style="display:none;position:fixed;inset:0;z-index:5000;background:#0b1220;flex-direction:column;height:100%;height:100dvh">
@@ -298,6 +298,7 @@ html,body{
     <button type="button" id="docZoomOut" style="width:34px;height:34px;border:none;border-radius:10px;background:#243044;color:#fff;font-weight:800">−</button>
     <button type="button" id="docZoomIn" style="width:34px;height:34px;border:none;border-radius:10px;background:#243044;color:#fff;font-weight:800">+</button>
     <button type="button" id="docZoomReset" style="height:34px;padding:0 8px;border:none;border-radius:10px;background:#243044;color:#fff;font-weight:700;font-size:12px">1:1</button>
+    <button type="button" id="docOpenExt" style="height:34px;padding:0 10px;border:none;border-radius:10px;background:#243044;color:#fff;font-weight:700;font-size:12px">Esterno</button>
   </div>
   <div id="docMeasureBar" style="display:none;gap:6px;padding:8px 10px;background:#121826;border-bottom:1px solid var(--line);flex-wrap:wrap;align-items:center">
     <button type="button" class="docm-btn" id="btnCalibrate" style="height:34px;padding:0 10px;border:none;border-radius:10px;background:#3dcfb0;color:#08221c;font-weight:800;font-size:12px">Scala</button>
