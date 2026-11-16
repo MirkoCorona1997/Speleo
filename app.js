@@ -1,4 +1,4 @@
-const DB='csr-grotte-v4', STORE_FAV='preferiti', STORE_NAMES='nomi', STORE_GEO='geojson';
+const DB='csr-grotte-v5', STORE_FAV='preferiti', STORE_NAMES='nomi', STORE_GEO='geojson', STORE_RIL='rilievi';
 let map, layer, all=[], cur=null, db=null, navMarker=null;
 const caveMarkers = new Map(); // id_ost -> L.circleMarker
 const STYLE_CAVE = { radius: 8, fillColor: '#3dcfb0', color: '#fff', weight: 2, opacity: 1, fillOpacity: 0.95 };
@@ -19,12 +19,13 @@ function clearCaveSelection() {
 
 function openDB(){
   return new Promise((ok,no)=>{
-    const r=indexedDB.open(DB,4);
+    const r=indexedDB.open(DB,5);
     r.onupgradeneeded=e=>{
       const d=e.target.result;
       if(!d.objectStoreNames.contains(STORE_FAV)) d.createObjectStore(STORE_FAV,{keyPath:'id_ost'});
       if(!d.objectStoreNames.contains(STORE_NAMES)) d.createObjectStore(STORE_NAMES,{keyPath:'id_ost'});
       if(!d.objectStoreNames.contains(STORE_GEO)) d.createObjectStore(STORE_GEO,{keyPath:'id'});
+      if(!d.objectStoreNames.contains(STORE_RIL)) d.createObjectStore(STORE_RIL,{keyPath:'codice'});
     };
     r.onsuccess=e=>{db=e.target.result;ok(db);};
     r.onerror=e=>no(e.target.error);
@@ -41,6 +42,30 @@ function saveGeojsonLocal(g){
     }catch(e){res(false);}
   });
 }
+
+function saveRilievoImage(codice, blob){
+  return new Promise(res=>{
+    if(!db||!codice||!blob) return res(false);
+    try{
+      const tx=db.transaction(STORE_RIL,'readwrite');
+      tx.objectStore(STORE_RIL).put({codice:padCat(codice), blob, at:Date.now()});
+      tx.oncomplete=()=>res(true);
+      tx.onerror=()=>res(false);
+    }catch(e){res(false);}
+  });
+}
+function loadRilievoImage(codice){
+  return new Promise(res=>{
+    if(!db||!codice) return res(null);
+    try{
+      const tx=db.transaction(STORE_RIL,'readonly');
+      const q=tx.objectStore(STORE_RIL).get(padCat(codice));
+      q.onsuccess=()=>res(q.result?q.result.blob:null);
+      q.onerror=()=>res(null);
+    }catch(e){res(null);}
+  });
+}
+
 function loadGeojsonLocal(){
   return new Promise(res=>{
     if(!db) return res(null);
@@ -615,7 +640,7 @@ function draw(feats){
 
 
 
-const DOC_CACHE_NAME = 'csr-docs-v97';
+const DOC_CACHE_NAME = 'csr-docs-v98';
 let docZoom = 1;
 let docPinch = null;
 let docCurrentUrl = null;
@@ -699,19 +724,18 @@ async function updateDocReadyLabels(codice) {
 }
 function applyDocZoom() {
   const wrap = document.getElementById('docZoomWrap');
-  const frame = document.getElementById('docFrame');
+  const img = document.getElementById('docImg');
   const scroll = document.getElementById('docScroll');
-  if (!wrap || !frame) return;
-  docZoom = Math.max(1, Math.min(4, docZoom));
-  let h = scroll ? scroll.clientHeight : 0;
-  if (!h || h < 100) h = Math.floor(window.innerHeight * 0.75);
-  wrap.style.height = h + 'px';
-  wrap.style.transform = docZoom === 1 ? 'none' : `scale(${docZoom})`;
-  wrap.style.width = docZoom === 1 ? '100%' : `${100 / docZoom}%`;
+  if (!wrap) return;
+  docZoom = Math.max(1, Math.min(5, docZoom));
   wrap.style.transformOrigin = '0 0';
-  frame.style.width = '100%';
-  frame.style.height = '100%';
-  frame.style.minHeight = '0';
+  wrap.style.transform = docZoom === 1 ? 'none' : `scale(${docZoom})`;
+  wrap.style.width = docZoom === 1 ? '100%' : (100 / docZoom) + '%';
+  if (img && img.naturalWidth) {
+    // natural size scaling via CSS width 100% of wrap
+    img.style.width = '100%';
+    img.style.height = 'auto';
+  }
   resizeMeasureSvg();
   redrawMeasures();
 }
@@ -768,9 +792,10 @@ function resizeMeasureSvg() {
   const svg = document.getElementById('docMeasureSvg');
   const wrap = document.getElementById('docZoomWrap');
   const hit = document.getElementById('docMeasureHit');
+  const img = document.getElementById('docImg');
   if (!svg || !wrap) return;
-  const w = wrap.offsetWidth || wrap.clientWidth || 1;
-  const h = Math.max(wrap.offsetHeight || 0, document.getElementById('docFrame')?.offsetHeight || 0, 400);
+  const w = Math.max(wrap.scrollWidth || 0, wrap.offsetWidth || 0, img?.offsetWidth || 0, 1);
+  const h = Math.max(wrap.scrollHeight || 0, wrap.offsetHeight || 0, img?.offsetHeight || 0, 400);
   svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
   svg.style.width = w + 'px';
   svg.style.height = h + 'px';
@@ -957,82 +982,74 @@ function onMeasureEnd(e) {
 
 async function openCsrDoc(url, title, opts) {
   opts = opts || {};
-  try {
-    const viewer = document.getElementById('docViewer');
-    const frame = document.getElementById('docFrame');
-    const tEl = document.getElementById('docTitle');
-    if (!viewer || !frame) {
-      window.open(url, '_blank', 'noopener');
-      return;
-    }
-    if (tEl) tEl.textContent = title || 'Documento';
-    docCurrentUrl = url;
-    docCurrentCodice = opts.codice ? padCat(opts.codice) : (cur && cur.properties ? padCat(cur.properties.codice) : null);
-    docCurrentKey = opts.docKey || (opts.isRilievo || /rilievo/i.test(title||'') ? 'rilievo' : (/posizionamento/i.test(title||'') ? 'pos' : 'scheda'));
-    docIsRilievo = !!(opts.isRilievo || (title && /rilievo/i.test(title)) || /rilievo-pdf/i.test(url));
-    docZoom = 1;
+  // For plain docs (not measure workspace), open externally
+  if (!opts.isRilievo && !opts.measureWorkspace) {
+    window.open(url, '_blank', 'noopener,noreferrer');
+    return;
+  }
+  openMeasureWorkspace(url, opts.codice);
+}
 
-    // Show viewer FIRST (layout needs visible element)
-    viewer.style.display = 'flex';
-    viewer.style.zIndex = '6000';
-    viewer.style.flexDirection = 'column';
-    viewer.style.position = 'fixed';
-    viewer.style.inset = '0';
+async function openMeasureWorkspace(pdfUrl, codice) {
+  const viewer = document.getElementById('docViewer');
+  const img = document.getElementById('docImg');
+  const empty = document.getElementById('docImgEmpty');
+  const tEl = document.getElementById('docTitle');
+  if (!viewer || !img) return;
+  docCurrentUrl = pdfUrl || null;
+  docCurrentCodice = codice ? padCat(codice) : (cur && cur.properties ? padCat(cur.properties.codice) : null);
+  docCurrentKey = 'rilievo';
+  docIsRilievo = true;
+  docZoom = 1;
+  if (tEl) tEl.textContent = (docCurrentCodice ? (docCurrentCodice + ' — ') : '') + 'Misura rilievo';
 
-    const bar = document.getElementById('docMeasureBar');
-    const list = document.getElementById('docMeasureList');
-    if (bar) {
-      bar.style.display = docIsRilievo ? 'flex' : 'none';
-      bar.style.flexWrap = 'wrap';
-    }
-    if (list) list.style.display = 'none';
+  viewer.style.display = 'flex';
+  viewer.style.zIndex = '6000';
+  viewer.style.flexDirection = 'column';
+  const bar = document.getElementById('docMeasureBar');
+  if (bar) bar.style.display = 'flex';
+  const list = document.getElementById('docMeasureList');
+  if (list) list.style.display = 'none';
 
-    if (docIsRilievo && docCurrentCodice) {
-      const saved = loadMeasures(docCurrentCodice);
-      measureScale = saved.scale;
-      measureItems = saved.items || [];
-      measureIdSeq = measureItems.reduce((m, it) => Math.max(m, parseInt(String(it.id).replace(/\D/g,''),10)||0), 0) + 1;
-    } else {
-      measureScale = null;
-      measureItems = [];
-    }
-    measureDraft = null;
-    setMeasureMode(docIsRilievo ? (measureScale ? 'measure' : 'pan') : 'pan');
+  if (docCurrentCodice) {
+    const saved = loadMeasures(docCurrentCodice);
+    measureScale = saved.scale;
+    measureItems = saved.items || [];
+  } else {
+    measureScale = null;
+    measureItems = [];
+  }
+  measureDraft = null;
+  setMeasureMode('pan');
 
-    // layout then size
+  // Load saved screenshot if any
+  img.onload = () => {
+    if (empty) empty.style.display = 'none';
+    img.style.display = 'block';
     requestAnimationFrame(() => {
       applyDocZoom();
       resizeMeasureSvg();
       redrawMeasures();
-      frame.src = url;
-      setTimeout(() => { applyDocZoom(); resizeMeasureSvg(); redrawMeasures(); }, 200);
-      setTimeout(() => { applyDocZoom(); resizeMeasureSvg(); }, 600);
     });
-
-    if (navigator.onLine) {
-      setTimeout(async () => {
-        try {
-          await ensureDocCached(url, docCurrentCodice, docCurrentKey);
-          markDocReady(docCurrentCodice, docCurrentKey);
-          updateDocReadyLabels(docCurrentCodice);
-          status((title || 'Documento') + ' — cache aggiornata');
-        } catch (e) {}
-      }, 2500);
-    } else {
-      status('Modalità offline');
-    }
-  } catch (err) {
-    console.error(err);
-    status('Apertura esterna…');
-    window.open(url, '_blank', 'noopener');
+  };
+  const blob = docCurrentCodice ? await loadRilievoImage(docCurrentCodice) : null;
+  if (blob) {
+    if (empty) empty.style.display = 'none';
+    img.style.display = 'block';
+    img.src = URL.createObjectURL(blob);
+    status('Rilievo offline caricato');
+  } else {
+    img.removeAttribute('src');
+    img.style.display = 'none';
+    if (empty) empty.style.display = 'block';
+    status('Importa uno screenshot del rilievo');
   }
+  requestAnimationFrame(() => { applyDocZoom(); resizeMeasureSvg(); redrawMeasures(); });
 }
 
 function closeDocViewer() {
   saveMeasures();
   const viewer = document.getElementById('docViewer');
-  const frame = document.getElementById('docFrame');
-  if (frame) frame.src = 'about:blank';
   if (viewer) viewer.style.display = 'none';
   docZoom = 1;
   measureDraft = null;
@@ -1042,12 +1059,40 @@ window.appCloseDoc = closeDocViewer;
 
 function initDocViewerUI() {
   document.getElementById('docClose')?.addEventListener('click', closeDocViewer);
-  document.getElementById('docOpenExt')?.addEventListener('click', () => {
-    if (docCurrentUrl) window.open(docCurrentUrl, '_blank', 'noopener');
-  });
   document.getElementById('docZoomIn')?.addEventListener('click', () => { docZoom += 0.25; applyDocZoom(); });
   document.getElementById('docZoomOut')?.addEventListener('click', () => { docZoom -= 0.25; applyDocZoom(); });
   document.getElementById('docZoomReset')?.addEventListener('click', () => { docZoom = 1; applyDocZoom(); });
+  document.getElementById('btnOpenPdf')?.addEventListener('click', () => {
+    if (docCurrentUrl) window.open(docCurrentUrl, '_blank', 'noopener,noreferrer');
+    else status('URL rilievo non disponibile');
+  });
+  document.getElementById('btnImportImg')?.addEventListener('click', () => {
+    document.getElementById('docImgInput')?.click();
+  });
+  document.getElementById('docImgInput')?.addEventListener('change', async ev => {
+    const file = ev.target.files && ev.target.files[0];
+    if (!file) return;
+    const img = document.getElementById('docImg');
+    const empty = document.getElementById('docImgEmpty');
+    const url = URL.createObjectURL(file);
+    if (img) {
+      img.onload = () => {
+        if (empty) empty.style.display = 'none';
+        img.style.display = 'block';
+        applyDocZoom();
+        resizeMeasureSvg();
+        redrawMeasures();
+      };
+      img.src = url;
+    }
+    if (docCurrentCodice) {
+      const ok = await saveRilievoImage(docCurrentCodice, file);
+      status(ok ? 'Screenshot salvato offline ✓' : 'Immagine caricata (non salvata in DB)');
+    } else {
+      status('Screenshot caricato');
+    }
+    ev.target.value = '';
+  });
   document.getElementById('btnCalibrate')?.addEventListener('click', () => setMeasureMode('calibrate'));
   document.getElementById('btnMeasure')?.addEventListener('click', () => {
     if (!measureScale) { status('Prima imposta la scala'); setMeasureMode('calibrate'); return; }
@@ -1127,8 +1172,8 @@ function openCard(f){
       const ready = isDocMarkedReady(codice, d.key);
       const label = d.label + (ready ? ' ✓' : '');
       if (d.key === 'rilievo') {
-        // Button → in-app viewer with measure tools
         docs += `<button type="button" class="${cls}" id="btnRilievo" data-url="${d.url}" style="${ready ? 'box-shadow:inset 0 0 0 1px #3dcfb0' : ''}">${label}</button>`;
+        docs += `<button type="button" class="bb" id="btnMisuraRilievo" data-url="${d.url}">Misura rilievo</button>`;
       } else {
         docs += `<a class="${cls}" href="${d.url}" target="_blank" rel="noopener noreferrer" data-csr-key="${d.key}" style="${ready ? 'box-shadow:inset 0 0 0 1px #3dcfb0' : ''}">${label}</a>`;
       }
@@ -1150,15 +1195,20 @@ function openCard(f){
 
   const btnRil = document.getElementById('btnRilievo');
   if (btnRil) {
-    const openRil = e => {
-      if (e) { e.preventDefault(); e.stopPropagation(); }
-      const url = btnRil.getAttribute('data-url') || btnRil.dataset.url;
-      if (!url) { status('URL rilievo mancante'); return; }
-      status('Apertura rilievo…');
-      openCsrDoc(url, 'Rilievo PDF', { codice: codice || p.codice, isRilievo: true, docKey: 'rilievo' });
+    btnRil.onclick = e => {
+      e.preventDefault(); e.stopPropagation();
+      const url = btnRil.dataset.url;
+      if (!url) return;
+      window.open(url, '_blank', 'noopener,noreferrer');
+      if (codice) markDocReady(codice, 'rilievo');
     };
-    btnRil.onclick = openRil;
-    btnRil.ontouchend = e => { e.preventDefault(); openRil(e); };
+  }
+  const btnMis = document.getElementById('btnMisuraRilievo');
+  if (btnMis) {
+    btnMis.onclick = e => {
+      e.preventDefault(); e.stopPropagation();
+      openMeasureWorkspace(btnMis.dataset.url, codice || p.codice);
+    };
   }
   document.querySelectorAll('#cardActions a[data-csr-key]').forEach(a => {
     a.addEventListener('click', () => {
@@ -2270,7 +2320,7 @@ async function init(){
     try { await saveGeojsonLocal(g); } catch (e3) {}
     try {
       if ('caches' in window) {
-        const cache = await caches.open('csr-grotte-v97');
+        const cache = await caches.open('csr-grotte-v98');
         await cache.add('./grotte_sardegna.geojson').catch(()=>{});
       }
     } catch (e4) {}
@@ -2284,16 +2334,52 @@ async function init(){
         if (base) p.nome = cat + ' - ' + base;
       }
     });
-    draw(all);
-    status(all.length + ' grotte' + (navigator.onLine ? '' : ' (offline)'));
+    if (navigator.onLine) {
+      draw(all);
+      status(all.length + ' grotte');
+    } else {
+      // Offline: only preferiti (as requested)
+      const favs = await allFavs();
+      if (favs.length) {
+        all = favs.map(it => favToFeature(it));
+        draw(all);
+        status(favs.length + ' grotte offline (preferiti)');
+      } else {
+        draw([]);
+        status('Offline: salva grotte con ★');
+      }
+    }
   } catch(e) {
-    status('Errore dati');
-    showError('Impossibile caricare le grotte. Apri l\'app ONLINE una volta, poi offline funzionerà.');
     console.error(e);
+    // Offline fallback: show only preferiti salvati
+    try {
+      await refreshFavIds();
+      const favs = await allFavs();
+      if (favs.length) {
+        all = favs.map(it => favToFeature(it));
+        draw(all);
+        status(favs.length + ' grotte offline (preferiti)');
+      } else {
+        status('Nessun dato offline');
+        showError('Offline: nessuna grotta nei preferiti. Online, salva le grotte con ★ Salva offline.');
+      }
+    } catch (e2) {
+      status('Errore dati');
+      showError('Apri l\'app online e salva le grotte offline (★).');
+    }
   }
 
   await refreshFavIds();
   renderFavs();
+  // If online catalog loaded but we are offline later, favorites remain in IDB
+  if (!navigator.onLine && (!all || !all.length)) {
+    const favs = await allFavs();
+    if (favs.length) {
+      all = favs.map(it => favToFeature(it));
+      draw(all);
+      status(favs.length + ' grotte offline (preferiti)');
+    }
+  }
   initTrackingUI();
 }
 init();
