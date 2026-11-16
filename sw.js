@@ -1,5 +1,6 @@
-const CACHE_NAME = 'csr-grotte-v83';
-const TILE_CACHE = 'csr-tiles-v83';
+const CACHE_NAME = 'csr-grotte-v84';
+const TILE_CACHE = 'csr-tiles-v84';
+const DOC_CACHE = 'csr-docs-v84';
 const APP_ASSETS = [
   './',
   './index.html',
@@ -42,7 +43,7 @@ self.addEventListener('activate', e => {
     caches.keys().then(keys =>
       Promise.all(
         keys
-          .filter(k => k !== CACHE_NAME && k !== TILE_CACHE)
+          .filter(k => k !== CACHE_NAME && k !== TILE_CACHE && k !== DOC_CACHE)
           .map(k => caches.delete(k))
       )
     ).then(() => self.clients.claim())
@@ -68,6 +69,25 @@ self.addEventListener('fetch', event => {
             if (res && res.ok) cache.put(req, res.clone());
             return res;
           }).catch(() => cached);
+          return cached || net;
+        })
+      )
+    );
+    return;
+  }
+
+
+  // CSR PDF / schede: cache for offline
+  if (url.hostname.includes('catastospeleologicoregionale.sardegna.it')) {
+    event.respondWith(
+      caches.open(DOC_CACHE).then(cache =>
+        cache.match(req).then(cached => {
+          const net = fetch(req).then(res => {
+            if (res && (res.ok || res.type === 'opaque')) {
+              cache.put(req, res.clone());
+            }
+            return res;
+          }).catch(() => cached || Response.error());
           return cached || net;
         })
       )

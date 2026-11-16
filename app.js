@@ -1,5 +1,21 @@
 const DB='csr-grotte-v3', STORE_FAV='preferiti', STORE_NAMES='nomi';
 let map, layer, all=[], cur=null, db=null, navMarker=null;
+const caveMarkers = new Map(); // id_ost -> L.circleMarker
+const STYLE_CAVE = { radius: 8, fillColor: '#3dcfb0', color: '#fff', weight: 2, opacity: 1, fillOpacity: 0.95 };
+const STYLE_SEL  = { radius: 11, fillColor: '#e85d5d', color: '#fff', weight: 3, opacity: 1, fillOpacity: 1 };
+
+function styleCaveMarker(id, selected) {
+  const m = caveMarkers.get(String(id));
+  if (!m) return;
+  m.setStyle(selected ? STYLE_SEL : STYLE_CAVE);
+  if (selected && m.bringToFront) m.bringToFront();
+}
+function clearCaveSelection() {
+  if (cur && cur.properties && cur.properties.id_ost != null) {
+    styleCaveMarker(cur.properties.id_ost, false);
+  }
+}
+
 
 function openDB(){
   return new Promise((ok,no)=>{
@@ -133,6 +149,13 @@ async function toggleFav(f){
     });
     favIds.add(id);
     status('Salvata offline ★');
+    if (navigator.onLine && f.properties.codice) {
+      status('Salvata ★ — scarico PDF…');
+      cacheCaveDocs(f.properties.codice).then(({ok, total}) => {
+        if (total) status(ok ? `Salvata ★ — ${ok}/${total} documenti in cache` : 'Salvata ★ — PDF non scaricabili ora');
+        updateDocButtons(f.properties.codice);
+      });
+    }
   }
   const b = document.getElementById('saveBtn');
   if (b) b.textContent = isFav(id) ? '★  Salvata offline' : '○  Salva offline';
@@ -551,18 +574,91 @@ function hideNavPin(){
 
 function draw(feats){
   layer.clearLayers();
+  caveMarkers.clear();
   feats.forEach(f=>{
     const [lo,la]=f.geometry.coordinates;
-    const m=L.circleMarker([la,lo],{radius:8,fillColor:'#3dcfb0',color:'#fff',weight:2,opacity:1,fillOpacity:0.95});
-    m.on('click',function(e){ L.DomEvent.stopPropagation(e); openCard(f); });
+    const id = f.properties && f.properties.id_ost != null ? String(f.properties.id_ost) : null;
+    const selected = cur && cur.properties && String(cur.properties.id_ost) === id;
+    const m = L.circleMarker([la,lo], selected ? STYLE_SEL : STYLE_CAVE);
+    m.on('click', function(e){ L.DomEvent.stopPropagation(e); openCard(f); });
     m.addTo(layer);
+    if (id) caveMarkers.set(id, m);
   });
   document.getElementById('status').textContent=feats.length+' grotte';
 }
 
+
+const DOC_CACHE_NAME = 'csr-docs-v85';
+function csrDocUrls(codice) {
+  const c = padCat(codice);
+  if (!c) return [];
+  return [
+    { key: 'scheda', label: 'Scheda completa', url: `https://m.catastospeleologicoregionale.sardegna.it/scheda-catastale/${c}` },
+    { key: 'pos', label: 'Scheda posizionamento', url: `https://www.catastospeleologicoregionale.sardegna.it/scheda-posizionamento/${c}` },
+    { key: 'rilievo', label: 'Rilievo PDF', url: `https://www.catastospeleologicoregionale.sardegna.it/rilievo-pdf/${c}` }
+  ];
+}
+async function isDocCached(url) {
+  try {
+    const cache = await caches.open(DOC_CACHE_NAME);
+    const hit = await cache.match(url, { ignoreSearch: false });
+    return !!hit;
+  } catch (e) { return false; }
+}
+async function cacheDoc(url) {
+  try {
+    const cache = await caches.open(DOC_CACHE_NAME);
+    // no-cors allows caching opaque PDF responses without CORS headers
+    const res = await fetch(url, { mode: 'no-cors', credentials: 'omit', cache: 'reload' });
+    await cache.put(url, res);
+    return true;
+  } catch (e) {
+    console.warn('doc cache fail', url, e);
+    return false;
+  }
+}
+async function cacheCaveDocs(codice) {
+  const list = csrDocUrls(codice);
+  if (!list.length || !navigator.onLine) return { ok: 0, total: 0 };
+  let ok = 0;
+  for (const d of list) {
+    if (await cacheDoc(d.url)) ok++;
+  }
+  return { ok, total: list.length };
+}
+async function updateDocButtons(codice) {
+  const list = csrDocUrls(codice);
+  for (const d of list) {
+    const btn = document.querySelector(`#cardActions [data-doc="${d.key}"]`);
+    if (!btn) continue;
+    const cached = await isDocCached(d.url);
+    const mark = cached ? ' ✓' : '';
+    if (d.key === 'scheda') btn.textContent = 'Scheda completa' + mark;
+    if (d.key === 'pos') btn.textContent = 'Scheda posizionamento' + mark;
+    if (d.key === 'rilievo') btn.textContent = 'Rilievo PDF' + mark;
+  }
+}
+async function openDoc(url, label) {
+  // Prefer cached copy as blob when possible (readable); else navigate
+  try {
+    const cache = await caches.open(DOC_CACHE_NAME);
+    const hit = await cache.match(url);
+    if (hit && hit.type !== 'opaque') {
+      const blob = await hit.blob();
+      const obj = URL.createObjectURL(blob);
+      window.open(obj, '_blank');
+      return;
+    }
+  } catch (e) {}
+  // Same URL: SW serves from cache offline if previously stored
+  window.open(url, '_blank');
+}
+
 function openCard(f){
   hideNavPin();
+  clearCaveSelection();
   cur=f;
+  if (f.properties && f.properties.id_ost != null) styleCaveMarker(f.properties.id_ost, true);
   const p=f.properties;
   const [lo,la]=f.geometry.coordinates;
   const cat=padCat(p.codice);
@@ -576,20 +672,13 @@ function openCard(f){
     (p.ambito?`<span class="pill">${esc(p.ambito)}</span>`:'')+
     `<span class="pill">${la.toFixed(5)}, ${lo.toFixed(5)}</span>`;
   const codice = padCat(p.codice);
-  const csrScheda = codice ? `https://m.catastospeleologicoregionale.sardegna.it/scheda-catastale/${codice}` : null;
-  const csrPos = codice ? `https://www.catastospeleologicoregionale.sardegna.it/scheda-posizionamento/${codice}` : null;
-  const csrRilievo = codice ? `https://www.catastospeleologicoregionale.sardegna.it/rilievo-pdf/${codice}` : null;
   let docs = '';
-  if (csrScheda) {
-    docs += `<a class="ba" href="${csrScheda}" target="_blank" rel="noopener">Scheda completa</a>`;
-  }
-  if (csrPos) {
-    docs += `<a class="bb" href="${csrPos}" target="_blank" rel="noopener">Scheda posizionamento</a>`;
-  }
-  if (csrRilievo) {
-    docs += `<a class="bb" href="${csrRilievo}" target="_blank" rel="noopener">Rilievo PDF</a>`;
-  }
-  if (!csrScheda && !csrPos && !csrRilievo) {
+  if (codice) {
+    docs += `<button type="button" class="ba" data-doc="scheda" data-url="https://m.catastospeleologicoregionale.sardegna.it/scheda-catastale/${codice}">Scheda completa</button>`;
+    docs += `<button type="button" class="bb" data-doc="pos" data-url="https://www.catastospeleologicoregionale.sardegna.it/scheda-posizionamento/${codice}">Scheda posizionamento</button>`;
+    docs += `<button type="button" class="bb" data-doc="rilievo" data-url="https://www.catastospeleologicoregionale.sardegna.it/rilievo-pdf/${codice}">Rilievo PDF</button>`;
+    docs += `<button type="button" class="bc" id="dlDocsBtn">⬇ Documenti offline</button>`;
+  } else {
     docs += `<span class="bc" style="opacity:.7">Documenti non disponibili (manca n. catastale)</span>`;
   }
   document.getElementById('cardActions').innerHTML =
@@ -600,6 +689,18 @@ function openCard(f){
   document.getElementById('card').classList.add('open');
   document.getElementById('saveBtn')?.addEventListener('click',()=>toggleFav(f));
   document.getElementById('expBtn')?.addEventListener('click',()=>toggleExplored(f));
+  document.querySelectorAll('#cardActions [data-doc]').forEach(btn => {
+    btn.addEventListener('click', () => openDoc(btn.dataset.url, btn.textContent));
+  });
+  document.getElementById('dlDocsBtn')?.addEventListener('click', async () => {
+    if (!navigator.onLine) { status('Serve connessione per scaricare i PDF'); return; }
+    if (!codice) return;
+    status('Scarico documenti…');
+    const {ok, total} = await cacheCaveDocs(codice);
+    status(total ? `${ok}/${total} documenti salvati offline` : 'Nessun documento');
+    updateDocButtons(codice);
+  });
+  if (codice) updateDocButtons(codice);
   // refresh state if favIds not yet loaded
   refreshFavIds().then(() => {
     const b = document.getElementById('saveBtn');
@@ -614,6 +715,7 @@ function openCard(f){
 
 function closeCard(){
   document.getElementById('card').classList.remove('open');
+  clearCaveSelection();
   cur=null;
 }
 
