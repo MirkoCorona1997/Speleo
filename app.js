@@ -649,7 +649,8 @@ let docCurrentKey = null;
 let docIsRilievo = false;
 let measureMode = 'pan'; // pan | calibrate | measure
 let measureScale = null; // meters per pixel at zoom 1 content coords
-let measureDraft = null; // {x1,y1,x2,y2}
+let measureDraft = null; // {x1,y1,x2,y2} while placing second point
+let measurePending = null; // {x,y} first tap waiting for second
 let measureItems = []; // {id,x1,y1,x2,y2,meters,label}
 let measureIdSeq = 1;
 
@@ -821,37 +822,45 @@ function redrawMeasures() {
   const svg = document.getElementById('docMeasureSvg');
   if (!svg) return;
   while (svg.firstChild) svg.removeChild(svg.firstChild);
+  const arm = 5; // half-size of X in content px (stays small while zoomed via same coords)
+  function drawX(x, y, color) {
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    [[-arm, -arm, arm, arm], [-arm, arm, arm, -arm]].forEach(([x1,y1,x2,y2]) => {
+      const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      l.setAttribute('x1', x + x1); l.setAttribute('y1', y + y1);
+      l.setAttribute('x2', x + x2); l.setAttribute('y2', y + y2);
+      l.setAttribute('stroke', color);
+      l.setAttribute('stroke-width', '1.25');
+      l.setAttribute('stroke-linecap', 'round');
+      g.appendChild(l);
+    });
+    svg.appendChild(g);
+  }
   const all = measureItems.slice();
   if (measureDraft) all.push({ ...measureDraft, draft: true });
   all.forEach(it => {
+    const col = it.draft ? '#f5b942' : (it.calib ? '#3b9eff' : '#ff5a5a');
     const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
     line.setAttribute('x1', it.x1); line.setAttribute('y1', it.y1);
     line.setAttribute('x2', it.x2); line.setAttribute('y2', it.y2);
-    line.setAttribute('stroke', it.draft ? '#f5b942' : (it.calib ? '#3b9eff' : '#e85d5d'));
-    line.setAttribute('stroke-width', it.draft ? 3 : 2.5);
+    line.setAttribute('stroke', col);
+    line.setAttribute('stroke-width', '1.2');
     line.setAttribute('stroke-linecap', 'round');
-    if (it.calib) line.setAttribute('stroke-dasharray', '6 4');
+    if (it.calib) line.setAttribute('stroke-dasharray', '4 3');
     svg.appendChild(line);
-    // endpoints
-    [[it.x1, it.y1], [it.x2, it.y2]].forEach(([x, y]) => {
-      const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      c.setAttribute('cx', x); c.setAttribute('cy', y); c.setAttribute('r', 5);
-      c.setAttribute('fill', it.draft ? '#f5b942' : '#fff');
-      c.setAttribute('stroke', it.draft ? '#f5b942' : '#e85d5d');
-      c.setAttribute('stroke-width', 2);
-      svg.appendChild(c);
-    });
+    drawX(it.x1, it.y1, col);
+    drawX(it.x2, it.y2, col);
     if (it.meters != null || it.draft) {
       const mx = (it.x1 + it.x2) / 2, my = (it.y1 + it.y2) / 2;
       const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      label.setAttribute('x', mx); label.setAttribute('y', my - 8);
+      label.setAttribute('x', mx); label.setAttribute('y', my - 6);
       label.setAttribute('text-anchor', 'middle');
       label.setAttribute('fill', '#fff');
-      label.setAttribute('font-size', '13');
+      label.setAttribute('font-size', '11');
       label.setAttribute('font-weight', '700');
       label.setAttribute('paint-order', 'stroke');
       label.setAttribute('stroke', '#000');
-      label.setAttribute('stroke-width', '3');
+      label.setAttribute('stroke-width', '2.5');
       let text = '';
       if (it.calib) text = 'Scala';
       else if (it.meters != null) text = formatMeters(it.meters);
@@ -861,6 +870,10 @@ function redrawMeasures() {
       svg.appendChild(label);
     }
   });
+  // pending first point alone
+  if (measurePending) {
+    drawX(measurePending.x, measurePending.y, '#f5b942');
+  }
   renderMeasureList();
   updateMeasureInfo();
 }
@@ -897,12 +910,21 @@ function renderMeasureList() {
 function updateMeasureInfo() {
   const info = document.getElementById('docMeasureInfo');
   if (!info) return;
-  if (measureMode === 'calibrate') info.textContent = 'Traccia il segmento di riferimento sulla scala del rilievo';
-  else if (measureMode === 'measure') info.textContent = measureScale ? ('Scala ok · ' + formatMeters(measureScale) + '/px — traccia una misura') : 'Prima imposta la scala';
-  else info.textContent = measureScale ? ('Scala: ' + (measureScale * 100).toFixed(3) + ' cm/px · ' + measureItems.filter(x=>!x.calib).length + ' misure') : 'Imposta la scala del rilievo';
+  if (measureMode === 'calibrate') {
+    info.textContent = measurePending ? 'Secondo tap: fine riferimento scala' : 'Primo tap: inizio riferimento scala';
+  } else if (measureMode === 'measure') {
+    if (!measureScale) info.textContent = 'Prima imposta la scala';
+    else info.textContent = measurePending ? 'Secondo tap: fine misura' : 'Primo tap: inizio misura';
+  } else {
+    info.textContent = measureScale
+      ? ('Scala ok · ' + measureItems.filter(x=>!x.calib).length + ' misure')
+      : 'Importa PDF, poi Scala / Misura';
+  }
 }
 function setMeasureMode(mode) {
   measureMode = mode;
+  measurePending = null;
+  measureDraft = null;
   const hit = document.getElementById('docMeasureHit');
   if (hit) hit.style.display = (mode === 'calibrate' || mode === 'measure') ? 'block' : 'none';
   const scroll = document.getElementById('docScroll');
@@ -914,6 +936,7 @@ function setMeasureMode(mode) {
     b.style.background = on ? '#3dcfb0' : '#243044';
     b.style.color = on ? '#08221c' : '#fff';
   });
+  redrawMeasures();
   updateMeasureInfo();
 }
 function contentPointFromEvent(e) {
@@ -925,63 +948,63 @@ function contentPointFromEvent(e) {
   const y = (e.clientY - rect.top) / docZoom;
   return { x, y };
 }
-function onMeasureStart(e) {
-  if (measureMode !== 'calibrate' && measureMode !== 'measure') return;
-  e.preventDefault();
-  const pt = contentPointFromEvent(e.touches ? e.touches[0] : e);
-  if (!pt) return;
-  measureDraft = { x1: pt.x, y1: pt.y, x2: pt.x, y2: pt.y, draft: true };
-  redrawMeasures();
-}
-function onMeasureMove(e) {
-  if (!measureDraft) return;
-  e.preventDefault();
-  const pt = contentPointFromEvent(e.touches ? e.touches[0] : e);
-  if (!pt) return;
-  measureDraft.x2 = pt.x;
-  measureDraft.y2 = pt.y;
-  redrawMeasures();
-}
-function onMeasureEnd(e) {
-  if (!measureDraft) return;
-  e.preventDefault();
-  const d = measureDraft;
-  measureDraft = null;
-  const dist = pxDist(d.x1, d.y1, d.x2, d.y2);
-  if (dist < 8) { redrawMeasures(); return; }
-
+function finishSegment(x1, y1, x2, y2) {
+  const dist = pxDist(x1, y1, x2, y2);
+  if (dist < 2) { status('Punti troppo vicini'); return; }
   if (measureMode === 'calibrate') {
-    const metersStr = prompt('Quanti metri corrisponde nella realtà questo segmento di riferimento?', '1');
-    if (metersStr == null) { redrawMeasures(); return; }
+    const metersStr = prompt('Quanti metri corrisponde nella realtà questo segmento?', '1');
+    if (metersStr == null) return;
     const meters = parseFloat(String(metersStr).replace(',', '.'));
-    if (!isFinite(meters) || meters <= 0) { status('Valore non valido'); redrawMeasures(); return; }
+    if (!isFinite(meters) || meters <= 0) { status('Valore non valido'); return; }
     measureScale = meters / dist;
-    // remove old calib markers
     measureItems = measureItems.filter(x => !x.calib);
     measureItems.push({
       id: 'c' + (measureIdSeq++),
-      x1: d.x1, y1: d.y1, x2: d.x2, y2: d.y2,
+      x1, y1, x2, y2,
       meters, calib: true, label: 'Scala ' + formatMeters(meters)
     });
     saveMeasures();
     setMeasureMode('measure');
-    status('Scala impostata: ' + formatMeters(meters) + ' su ' + Math.round(dist) + ' px');
+    status('Scala: ' + formatMeters(meters));
   } else if (measureMode === 'measure') {
-    if (!measureScale) {
-      status('Imposta prima la scala');
-      redrawMeasures();
-      return;
-    }
+    if (!measureScale) { status('Imposta prima la scala'); return; }
     const meters = dist * measureScale;
     measureItems.push({
       id: 'm' + (measureIdSeq++),
-      x1: d.x1, y1: d.y1, x2: d.x2, y2: d.y2,
+      x1, y1, x2, y2,
       meters, label: formatMeters(meters)
     });
     saveMeasures();
     status('Misura: ' + formatMeters(meters));
   }
   redrawMeasures();
+}
+function onMeasureTap(e) {
+  if (measureMode !== 'calibrate' && measureMode !== 'measure') return;
+  e.preventDefault();
+  e.stopPropagation();
+  const src = e.changedTouches ? e.changedTouches[0] : e;
+  const pt = contentPointFromEvent(src);
+  if (!pt) return;
+  if (!measurePending) {
+    measurePending = { x: pt.x, y: pt.y };
+    measureDraft = null;
+    redrawMeasures();
+    updateMeasureInfo();
+    return;
+  }
+  const x1 = measurePending.x, y1 = measurePending.y;
+  measurePending = null;
+  measureDraft = null;
+  finishSegment(x1, y1, pt.x, pt.y);
+  updateMeasureInfo();
+}
+// legacy names used by initDocViewerUI
+function onMeasureStart(e) { /* two-tap: ignore drag start */ }
+function onMeasureMove(e) { /* two-tap: no drag */ }
+function onMeasureEnd(e) {
+  if (measureMode !== 'calibrate' && measureMode !== 'measure') return;
+  onMeasureTap(e);
 }
 
 
@@ -1019,24 +1042,39 @@ async function renderPdfPage() {
       (document.getElementById('docZoomWrap') && document.getElementById('docZoomWrap').clientWidth) || 0,
       window.innerWidth || 320
     );
-    // Render at 2× CSS width for sharp zoom
+    // High-res: ~5× screen width so zoom max stays sharp
     const cssWidth = containerW;
-    const scale = (cssWidth / unscaled.width) * 2;
+    const quality = Math.min(5, Math.max(3, (window.devicePixelRatio || 1) * 3));
+    const scale = (cssWidth / unscaled.width) * quality;
     const viewport = page.getViewport({ scale });
     const ctx = canvas.getContext('2d', { alpha: false });
-    canvas.width = Math.floor(viewport.width);
-    canvas.height = Math.floor(viewport.height);
+    // Cap pixel size ~16MP to avoid iOS memory kill
+    let cw = Math.floor(viewport.width), ch = Math.floor(viewport.height);
+    const maxPix = 16e6;
+    if (cw * ch > maxPix) {
+      const f = Math.sqrt(maxPix / (cw * ch));
+      cw = Math.floor(cw * f);
+      ch = Math.floor(ch * f);
+    }
+    canvas.width = cw;
+    canvas.height = ch;
     const cssHeight = Math.floor(cssWidth * (unscaled.height / unscaled.width));
     canvas.style.display = 'block';
     canvas.style.width = cssWidth + 'px';
     canvas.style.height = cssHeight + 'px';
     canvas.style.maxWidth = 'none';
     canvas.style.background = '#fff';
+    // If we capped pixels, recompute viewport to match canvas
+    const v2 = page.getViewport({ scale: scale * (cw / Math.floor(viewport.width)) });
     if (img) img.style.display = 'none';
     if (empty) empty.style.display = 'none';
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    await page.render({ canvasContext: ctx, viewport }).promise;
+    const renderVp = page.getViewport({ scale: (cssWidth / unscaled.width) * quality * (cw / (unscaled.width * (cssWidth / unscaled.width) * quality)) });
+    // simpler: scale so viewport matches canvas pixel size
+    const fitScale = cw / unscaled.width;
+    const fitVp = page.getViewport({ scale: fitScale });
+    await page.render({ canvasContext: ctx, viewport: fitVp }).promise;
     status('PDF pagina ' + pdfPageNum + (pdfDoc.numPages > 1 ? ('/' + pdfDoc.numPages) : ''));
     requestAnimationFrame(() => {
       applyDocZoom();
@@ -1239,13 +1277,8 @@ function initDocViewerUI() {
   });
   const hit = document.getElementById('docMeasureHit');
   if (hit) {
-    hit.addEventListener('pointerdown', onMeasureStart);
-    hit.addEventListener('pointermove', onMeasureMove);
-    hit.addEventListener('pointerup', onMeasureEnd);
-    hit.addEventListener('pointercancel', onMeasureEnd);
-    hit.addEventListener('touchstart', onMeasureStart, { passive: false });
-    hit.addEventListener('touchmove', onMeasureMove, { passive: false });
-    hit.addEventListener('touchend', onMeasureEnd, { passive: false });
+    hit.addEventListener('click', onMeasureTap);
+    hit.addEventListener('touchend', onMeasureTap, { passive: false });
   }
   const scroll = document.getElementById('docScroll');
   if (scroll) {
