@@ -963,21 +963,13 @@ function renderMeasureList() {
 }
 function updateMeasureInfo() {
   const info = document.getElementById('docMeasureInfo');
-  if (!info) return;
+  if (info) { info.style.display = 'none'; info.textContent = ''; }
+  // short status only (bottom), no text in the toolbar
   if (measureMode === 'calibrate' || measureMode === 'measure') {
-    if (measureEdit) {
-      info.textContent = 'Sposta la X, poi OK (' + (measureEdit.step === 1 ? '1°' : '2°') + ' punto)';
-    } else if (measurePending) {
-      info.textContent = 'Tocca per posizionare il 2° punto';
-    } else if (measureMode === 'calibrate') {
-      info.textContent = 'Tocca per posizionare il 1° punto della scala';
-    } else {
-      info.textContent = measureScale ? 'Tocca per posizionare il 1° punto' : 'Prima imposta la Scala';
-    }
-  } else {
-    info.textContent = measureScale
-      ? ('Scala ok · ' + measureItems.filter(x => !x.calib).length + ' misure')
-      : 'Importa PDF, poi Scala / Misura';
+    if (measureEdit) status('Sposta X → OK (' + (measureEdit.step === 1 ? '1°' : '2°') + ')');
+    else if (measurePending) status('Posiziona il 2° punto');
+    else if (measureMode === 'calibrate') status('Posiziona il 1° punto scala');
+    else status(measureScale ? 'Posiziona il 1° punto' : 'Prima imposta la Scala');
   }
 }
 function syncMeasureHitLayer() {
