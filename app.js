@@ -877,14 +877,13 @@ function redrawMeasures() {
       svg.appendChild(label);
     }
   });
-  if (measurePending) drawX(measurePending.x, measurePending.y, '#3dcfb0');
-  if (measureEdit) drawX(measureEdit.x, measureEdit.y, '#f5b942');
+  if (measurePending) drawX(measurePending.x, measurePending.y, '#f5b942');
   renderMeasureList();
   updateMeasureInfo();
   const okBtn = document.getElementById('btnPointOk');
   const cancelBtn = document.getElementById('btnPointCancel');
-  if (okBtn) okBtn.style.display = measureEdit ? 'inline-flex' : 'none';
-  if (cancelBtn) cancelBtn.style.display = measureEdit ? 'inline-flex' : 'none';
+  if (okBtn) okBtn.style.display = 'none';
+  if (cancelBtn) cancelBtn.style.display = measurePending ? 'inline-flex' : 'none';
 }
 function renderMeasureList() {
   const el = document.getElementById('docMeasureList');
@@ -919,19 +918,14 @@ function renderMeasureList() {
 function updateMeasureInfo() {
   const info = document.getElementById('docMeasureInfo');
   if (!info) return;
-  if (measureMode === 'calibrate' || measureMode === 'measure') {
-    if (measureEdit) {
-      info.textContent = 'Sposta la X, poi OK punto (' + (measureEdit.step === 1 ? '1°' : '2°') + ')';
-    } else if (measurePending) {
-      info.textContent = 'Tocca per il 2° punto, poi spostalo e OK';
-    } else {
-      info.textContent = measureMode === 'calibrate'
-        ? 'Tocca per il 1° punto della scala'
-        : (measureScale ? 'Tocca per il 1° punto di misura' : 'Prima imposta la scala');
-    }
+  if (measureMode === 'calibrate') {
+    info.textContent = measurePending ? 'Tocca il 2° punto della scala' : 'Tocca il 1° punto della scala';
+  } else if (measureMode === 'measure') {
+    if (!measureScale) info.textContent = 'Prima imposta la Scala';
+    else info.textContent = measurePending ? 'Tocca il 2° punto della misura' : 'Tocca il 1° punto della misura';
   } else {
     info.textContent = measureScale
-      ? ('Scala ok · ' + measureItems.filter(x=>!x.calib).length + ' misure')
+      ? ('Scala ok · ' + measureItems.filter(x => !x.calib).length + ' misure')
       : 'Importa PDF, poi Scala / Misura';
   }
 }
@@ -942,9 +936,19 @@ function setMeasureMode(mode) {
   measureEdit = null;
   measureDragging = false;
   const hit = document.getElementById('docMeasureHit');
-  if (hit) hit.style.display = (mode === 'calibrate' || mode === 'measure') ? 'block' : 'none';
+  const canvas = document.getElementById('docPdfCanvas');
+  if (hit) {
+    const show = (mode === 'calibrate' || mode === 'measure');
+    hit.style.display = show ? 'block' : 'none';
+    hit.style.pointerEvents = show ? 'auto' : 'none';
+    // match canvas size so taps register on the PDF
+    if (canvas && canvas.offsetWidth) {
+      hit.style.width = canvas.offsetWidth + 'px';
+      hit.style.height = canvas.offsetHeight + 'px';
+    }
+  }
   const scroll = document.getElementById('docScroll');
-  if (scroll) scroll.style.touchAction = (mode === 'pan') ? 'pan-x pan-y' : 'none';
+  if (scroll) scroll.style.touchAction = (mode === 'pan') ? 'pan-x pan-y' : 'manipulation';
   ['btnCalibrate','btnMeasure','btnMeasurePan'].forEach(id => {
     const b = document.getElementById(id);
     if (!b) return;
@@ -955,7 +959,7 @@ function setMeasureMode(mode) {
   resizeMeasureSvg();
   redrawMeasures();
   updateMeasureInfo();
-  status(mode === 'calibrate' ? 'Modalità SCALA' : (mode === 'measure' ? 'Modalità MISURA' : 'Scorri'));
+  status(mode === 'calibrate' ? 'SCALA: tocca 2 punti' : (mode === 'measure' ? 'MISURA: tocca 2 punti' : 'Scorri / zoom'));
 }
 function contentPointFromEvent(e) {
   const wrap = document.getElementById('docZoomWrap');
@@ -968,32 +972,24 @@ function contentPointFromEvent(e) {
 }
 function finishSegment(x1, y1, x2, y2) {
   const dist = pxDist(x1, y1, x2, y2);
-  if (dist < 1) { status('Punti troppo vicini'); return; }
+  if (dist < 2) { status('Punti troppo vicini, riprova'); return; }
   if (measureMode === 'calibrate') {
-    const metersStr = prompt('Quanti metri corrisponde nella realtà questo segmento?', '1');
-    if (metersStr == null) return;
+    const metersStr = prompt('Quanti metri nella realtà corrisponde questo segmento?', '1');
+    if (metersStr == null) { measurePending = null; redrawMeasures(); return; }
     const meters = parseFloat(String(metersStr).replace(',', '.'));
     if (!isFinite(meters) || meters <= 0) { status('Valore non valido'); return; }
     measureScale = meters / dist;
     measureItems = measureItems.filter(x => !x.calib);
-    measureItems.push({
-      id: 'c' + (measureIdSeq++),
-      x1, y1, x2, y2,
-      meters, calib: true, label: 'Scala ' + formatMeters(meters)
-    });
+    measureItems.push({ id: 'c' + (measureIdSeq++), x1, y1, x2, y2, meters, calib: true, label: 'Scala ' + formatMeters(meters) });
     saveMeasures();
     measurePending = null;
     measureEdit = null;
     setMeasureMode('measure');
-    status('Scala: ' + formatMeters(meters));
+    status('Scala impostata: ' + formatMeters(meters));
   } else if (measureMode === 'measure') {
-    if (!measureScale) { status('Imposta prima la scala'); return; }
+    if (!measureScale) { status('Prima imposta la scala'); return; }
     const meters = dist * measureScale;
-    measureItems.push({
-      id: 'm' + (measureIdSeq++),
-      x1, y1, x2, y2,
-      meters, label: formatMeters(meters)
-    });
+    measureItems.push({ id: 'm' + (measureIdSeq++), x1, y1, x2, y2, meters, label: formatMeters(meters) });
     saveMeasures();
     measurePending = null;
     measureEdit = null;
@@ -1001,74 +997,43 @@ function finishSegment(x1, y1, x2, y2) {
   }
   redrawMeasures();
 }
-function confirmMeasurePoint() {
-  if (!measureEdit) return;
-  if (measureEdit.step === 1) {
-    measurePending = { x: measureEdit.x, y: measureEdit.y };
-    measureEdit = null;
-    status('1° punto OK — tocca per il 2°');
-  } else {
-    if (!measurePending) { measureEdit = null; redrawMeasures(); return; }
-    const x1 = measurePending.x, y1 = measurePending.y;
-    const x2 = measureEdit.x, y2 = measureEdit.y;
-    measureEdit = null;
-    measurePending = null;
-    finishSegment(x1, y1, x2, y2);
-  }
-  redrawMeasures();
-  updateMeasureInfo();
-}
-function cancelMeasurePoint() {
-  measureEdit = null;
-  measureDragging = false;
-  redrawMeasures();
-  updateMeasureInfo();
-}
-function placeOrMovePoint(clientX, clientY) {
+
+// Two taps: 1st point, 2nd point → done (simple, reliable)
+function onMeasurePointer(e) {
   if (measureMode !== 'calibrate' && measureMode !== 'measure') return;
-  const pt = contentPointFromEvent({ clientX, clientY });
-  if (!pt) return;
-  if (measureEdit) {
-    // move current point
-    measureEdit.x = pt.x;
-    measureEdit.y = pt.y;
-  } else {
-    const step = measurePending ? 2 : 1;
-    measureEdit = { x: pt.x, y: pt.y, step };
-  }
-  redrawMeasures();
-  updateMeasureInfo();
-}
-function onMeasureStart(e) {
-  if (measureMode !== 'calibrate' && measureMode !== 'measure') return;
+  // ignore multi-touch (pinch zoom)
   if (e.touches && e.touches.length > 1) return;
+  if (e.pointerType === 'touch' && e.type === 'pointerdown' && e.isPrimary === false) return;
   e.preventDefault();
   e.stopPropagation();
-  const src = e.touches ? e.touches[0] : e;
-  measureDragging = true;
-  placeOrMovePoint(src.clientX, src.clientY);
-}
-function onMeasureMove(e) {
-  if (!measureDragging || !measureEdit) return;
-  if (e.touches && e.touches.length > 1) return;
-  e.preventDefault();
-  const src = e.touches ? e.touches[0] : e;
-  placeOrMovePoint(src.clientX, src.clientY);
-}
-function onMeasureEnd(e) {
-  if (!measureDragging) return;
-  measureDragging = false;
-  e.preventDefault();
-  // point stays in measureEdit until OK
-  redrawMeasures();
+  const src = (e.changedTouches && e.changedTouches[0]) || (e.touches && e.touches[0]) || e;
+  if (!src || src.clientX == null) return;
+  const pt = contentPointFromEvent(src);
+  if (!pt) return;
+
+  if (!measurePending) {
+    measurePending = { x: pt.x, y: pt.y };
+    measureEdit = null;
+    status('1° punto — tocca il 2°');
+    redrawMeasures();
+    updateMeasureInfo();
+    return;
+  }
+  const x1 = measurePending.x, y1 = measurePending.y;
+  measurePending = null;
+  finishSegment(x1, y1, pt.x, pt.y);
   updateMeasureInfo();
 }
-function onMeasureTap(e) {
-  // fallback for click
-  if (measureMode !== 'calibrate' && measureMode !== 'measure') return;
-  if (measureDragging) return;
-  const src = e.changedTouches ? e.changedTouches[0] : e;
-  placeOrMovePoint(src.clientX, src.clientY);
+function onMeasureStart(e) { onMeasurePointer(e); }
+function onMeasureMove(e) { /* no drag in simple mode */ }
+function onMeasureEnd(e) { /* placement on start */ }
+function onMeasureTap(e) { onMeasurePointer(e); }
+function confirmMeasurePoint() { /* unused in simple mode */ }
+function cancelMeasurePoint() {
+  measurePending = null;
+  measureEdit = null;
+  redrawMeasures();
+  updateMeasureInfo();
 }
 
 
@@ -1105,20 +1070,21 @@ async function renderPdfPage() {
       (document.getElementById('docZoomWrap') && document.getElementById('docZoomWrap').clientWidth) || 0,
       window.innerWidth || 320
     );
-    // Max practical quality: enough pixels for ~12–15× zoom without blur
-    const cssWidth = containerW;
+    // High quality: internal pixels = CSS size × quality factor
+    const cssWidth = Math.max(containerW, 320);
     const cssHeight = Math.floor(cssWidth * (unscaled.height / unscaled.width));
-    // 12× screen width of pixels (capped by memory ~40MP on iOS)
-    let targetMul = 12;
-    let fitScale = (cssWidth / unscaled.width) * targetMul;
+    // 6× is sharp up to ~6× zoom; higher risks iOS killing the tab
+    let mul = 6;
+    let fitScale = (cssWidth / unscaled.width) * mul;
     let cw = Math.floor(unscaled.width * fitScale);
     let ch = Math.floor(unscaled.height * fitScale);
-    const maxPix = 40e6;
+    const maxPix = 20e6; // safer for iPhone
     if (cw * ch > maxPix) {
       const f = Math.sqrt(maxPix / (cw * ch));
       fitScale *= f;
       cw = Math.floor(unscaled.width * fitScale);
       ch = Math.floor(unscaled.height * fitScale);
+      mul = fitScale / (cssWidth / unscaled.width);
     }
     const fitVp = page.getViewport({ scale: fitScale });
     const ctx = canvas.getContext('2d', { alpha: false });
@@ -1129,17 +1095,23 @@ async function renderPdfPage() {
     canvas.style.height = cssHeight + 'px';
     canvas.style.maxWidth = 'none';
     canvas.style.background = '#fff';
-    canvas.style.imageRendering = 'auto';
     if (img) img.style.display = 'none';
     if (empty) empty.style.display = 'none';
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    status('Rendering PDF qualità originale…');
-    await page.render({ canvasContext: ctx, viewport: fitVp, intent: 'print' }).promise;
-    status('PDF pagina ' + pdfPageNum + (pdfDoc.numPages > 1 ? ('/' + pdfDoc.numPages) : ''));
+    status('Rendering… ' + cw + '×' + ch + ' px');
+    await page.render({ canvasContext: ctx, viewport: fitVp }).promise;
+    status('PDF pronto · ' + cw + '×' + ch);
     requestAnimationFrame(() => {
       applyDocZoom();
       resizeMeasureSvg();
+      const hit = document.getElementById('docMeasureHit');
+      if (hit && canvas) {
+        hit.style.width = canvas.offsetWidth + 'px';
+        hit.style.height = canvas.offsetHeight + 'px';
+      }
       redrawMeasures();
     });
   } catch (e) {
@@ -1382,12 +1354,9 @@ function initDocViewerUI() {
   const hit = document.getElementById('docMeasureHit');
   if (hit) {
     hit.style.pointerEvents = 'auto';
-    hit.addEventListener('pointerdown', onMeasureStart, { capture: true });
-    hit.addEventListener('pointermove', onMeasureMove, { capture: true });
-    hit.addEventListener('pointerup', onMeasureEnd, { capture: true });
-    hit.addEventListener('touchstart', onMeasureStart, { passive: false, capture: true });
-    hit.addEventListener('touchmove', onMeasureMove, { passive: false, capture: true });
-    hit.addEventListener('touchend', onMeasureEnd, { passive: false, capture: true });
+    // single event path to avoid double taps
+    hit.addEventListener('pointerup', onMeasurePointer, { capture: true });
+    hit.addEventListener('touchend', onMeasurePointer, { passive: false, capture: true });
   }
   document.getElementById('btnPointOk')?.addEventListener('click', e => {
     e.preventDefault(); e.stopPropagation();
