@@ -952,8 +952,10 @@ function setMeasureMode(mode) {
     b.style.background = on ? '#3dcfb0' : '#243044';
     b.style.color = on ? '#08221c' : '#fff';
   });
+  resizeMeasureSvg();
   redrawMeasures();
   updateMeasureInfo();
+  status(mode === 'calibrate' ? 'Modalità SCALA' : (mode === 'measure' ? 'Modalità MISURA' : 'Scorri'));
 }
 function contentPointFromEvent(e) {
   const wrap = document.getElementById('docZoomWrap');
@@ -1022,62 +1024,52 @@ function cancelMeasurePoint() {
   redrawMeasures();
   updateMeasureInfo();
 }
-function onMeasureTap(e) {
+function placeOrMovePoint(clientX, clientY) {
   if (measureMode !== 'calibrate' && measureMode !== 'measure') return;
-  // If already editing, taps move the point (handled by drag); ignore extra place
-  if (measureEdit) return;
-  e.preventDefault();
-  e.stopPropagation();
-  const src = e.changedTouches ? e.changedTouches[0] : e;
-  const pt = contentPointFromEvent(src);
+  const pt = contentPointFromEvent({ clientX, clientY });
   if (!pt) return;
-  const step = measurePending ? 2 : 1;
-  measureEdit = { x: pt.x, y: pt.y, step };
+  if (measureEdit) {
+    // move current point
+    measureEdit.x = pt.x;
+    measureEdit.y = pt.y;
+  } else {
+    const step = measurePending ? 2 : 1;
+    measureEdit = { x: pt.x, y: pt.y, step };
+  }
   redrawMeasures();
   updateMeasureInfo();
 }
 function onMeasureStart(e) {
   if (measureMode !== 'calibrate' && measureMode !== 'measure') return;
-  if (!measureEdit) return;
+  if (e.touches && e.touches.length > 1) return;
   e.preventDefault();
+  e.stopPropagation();
   const src = e.touches ? e.touches[0] : e;
-  const pt = contentPointFromEvent(src);
-  if (!pt) return;
-  // start drag if near current edit point (~30px content)
-  const d = pxDist(pt.x, pt.y, measureEdit.x, measureEdit.y);
-  if (d < 40 / Math.max(docZoom, 1)) {
-    measureDragging = true;
-    measureEdit.x = pt.x;
-    measureEdit.y = pt.y;
-    redrawMeasures();
-  }
+  measureDragging = true;
+  placeOrMovePoint(src.clientX, src.clientY);
 }
 function onMeasureMove(e) {
   if (!measureDragging || !measureEdit) return;
+  if (e.touches && e.touches.length > 1) return;
   e.preventDefault();
   const src = e.touches ? e.touches[0] : e;
-  const pt = contentPointFromEvent(src);
-  if (!pt) return;
-  measureEdit.x = pt.x;
-  measureEdit.y = pt.y;
-  redrawMeasures();
+  placeOrMovePoint(src.clientX, src.clientY);
 }
 function onMeasureEnd(e) {
-  if (measureDragging) {
-    measureDragging = false;
-    e.preventDefault();
-    redrawMeasures();
-    return;
-  }
-  // no active edit → treat as place tap
-  if (!measureEdit) onMeasureTap(e);
+  if (!measureDragging) return;
+  measureDragging = false;
+  e.preventDefault();
+  // point stays in measureEdit until OK
+  redrawMeasures();
+  updateMeasureInfo();
 }
-
-
-let pdfDoc = null;
-let pdfPageNum = 1;
-let pdfRenderScale = 1.5;
-let pdfRendering = false;
+function onMeasureTap(e) {
+  // fallback for click
+  if (measureMode !== 'calibrate' && measureMode !== 'measure') return;
+  if (measureDragging) return;
+  const src = e.changedTouches ? e.changedTouches[0] : e;
+  placeOrMovePoint(src.clientX, src.clientY);
+}
 
 
 function setupPdfJs() {
@@ -1108,15 +1100,15 @@ async function renderPdfPage() {
       (document.getElementById('docZoomWrap') && document.getElementById('docZoomWrap').clientWidth) || 0,
       window.innerWidth || 320
     );
-    // Near-original resolution: aim ~300 DPI equivalent, cap ~25MP for iOS
+    // Max practical quality: enough pixels for ~12–15× zoom without blur
     const cssWidth = containerW;
     const cssHeight = Math.floor(cssWidth * (unscaled.height / unscaled.width));
-    // Prefer high internal pixels: 4–8 × CSS width
-    let targetScale = Math.max(4, Math.min(8, (window.devicePixelRatio || 2) * 4));
-    let fitScale = (cssWidth / unscaled.width) * targetScale;
+    // 12× screen width of pixels (capped by memory ~40MP on iOS)
+    let targetMul = 12;
+    let fitScale = (cssWidth / unscaled.width) * targetMul;
     let cw = Math.floor(unscaled.width * fitScale);
     let ch = Math.floor(unscaled.height * fitScale);
-    const maxPix = 25e6;
+    const maxPix = 40e6;
     if (cw * ch > maxPix) {
       const f = Math.sqrt(maxPix / (cw * ch));
       fitScale *= f;
@@ -1132,12 +1124,13 @@ async function renderPdfPage() {
     canvas.style.height = cssHeight + 'px';
     canvas.style.maxWidth = 'none';
     canvas.style.background = '#fff';
+    canvas.style.imageRendering = 'auto';
     if (img) img.style.display = 'none';
     if (empty) empty.style.display = 'none';
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    status('Rendering PDF alta qualità…');
-    await page.render({ canvasContext: ctx, viewport: fitVp }).promise;
+    status('Rendering PDF qualità originale…');
+    await page.render({ canvasContext: ctx, viewport: fitVp, intent: 'print' }).promise;
     status('PDF pagina ' + pdfPageNum + (pdfDoc.numPages > 1 ? ('/' + pdfDoc.numPages) : ''));
     requestAnimationFrame(() => {
       applyDocZoom();
@@ -1354,16 +1347,13 @@ function initDocViewerUI() {
   });
   const hit = document.getElementById('docMeasureHit');
   if (hit) {
-    hit.addEventListener('pointerdown', onMeasureStart);
-    hit.addEventListener('pointermove', onMeasureMove);
-    hit.addEventListener('pointerup', onMeasureEnd);
-    hit.addEventListener('touchstart', onMeasureStart, { passive: false });
-    hit.addEventListener('touchmove', onMeasureMove, { passive: false });
-    hit.addEventListener('touchend', onMeasureEnd, { passive: false });
-    hit.addEventListener('click', e => {
-      if (measureEdit) return; // placement via touchend/pointerup
-      onMeasureTap(e);
-    });
+    hit.style.pointerEvents = 'auto';
+    hit.addEventListener('pointerdown', onMeasureStart, { capture: true });
+    hit.addEventListener('pointermove', onMeasureMove, { capture: true });
+    hit.addEventListener('pointerup', onMeasureEnd, { capture: true });
+    hit.addEventListener('touchstart', onMeasureStart, { passive: false, capture: true });
+    hit.addEventListener('touchmove', onMeasureMove, { passive: false, capture: true });
+    hit.addEventListener('touchend', onMeasureEnd, { passive: false, capture: true });
   }
   document.getElementById('btnPointOk')?.addEventListener('click', e => {
     e.preventDefault(); e.stopPropagation();
