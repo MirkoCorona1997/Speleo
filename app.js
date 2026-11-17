@@ -923,13 +923,14 @@ function redrawMeasures() {
       svg.appendChild(label);
     }
   });
-  if (measurePending) drawX(measurePending.x, measurePending.y, '#f5b942');
+  if (measurePending) drawX(measurePending.x, measurePending.y, '#3dcfb0');
+  if (measureEdit) drawX(measureEdit.x, measureEdit.y, '#f5b942');
   renderMeasureList();
   updateMeasureInfo();
   const okBtn = document.getElementById('btnPointOk');
   const cancelBtn = document.getElementById('btnPointCancel');
-  if (okBtn) okBtn.style.display = 'none';
-  if (cancelBtn) cancelBtn.style.display = measurePending ? 'inline-flex' : 'none';
+  if (okBtn) okBtn.style.display = measureEdit ? 'inline-flex' : 'none';
+  if (cancelBtn) cancelBtn.style.display = measureEdit ? 'inline-flex' : 'none';
 }
 function renderMeasureList() {
   const el = document.getElementById('docMeasureList');
@@ -963,11 +964,16 @@ function renderMeasureList() {
 function updateMeasureInfo() {
   const info = document.getElementById('docMeasureInfo');
   if (!info) return;
-  if (measureMode === 'calibrate') {
-    info.textContent = measurePending ? 'Tocca il 2° punto della scala' : 'Tocca il 1° punto della scala';
-  } else if (measureMode === 'measure') {
-    if (!measureScale) info.textContent = 'Prima imposta la Scala';
-    else info.textContent = measurePending ? 'Tocca il 2° punto della misura' : 'Tocca il 1° punto della misura';
+  if (measureMode === 'calibrate' || measureMode === 'measure') {
+    if (measureEdit) {
+      info.textContent = 'Sposta la X, poi OK (' + (measureEdit.step === 1 ? '1°' : '2°') + ' punto)';
+    } else if (measurePending) {
+      info.textContent = 'Tocca per posizionare il 2° punto';
+    } else if (measureMode === 'calibrate') {
+      info.textContent = 'Tocca per posizionare il 1° punto della scala';
+    } else {
+      info.textContent = measureScale ? 'Tocca per posizionare il 1° punto' : 'Prima imposta la Scala';
+    }
   } else {
     info.textContent = measureScale
       ? ('Scala ok · ' + measureItems.filter(x => !x.calib).length + ' misure')
@@ -1062,44 +1068,86 @@ function finishSegment(x1, y1, x2, y2) {
 
 // Two taps: 1st point, 2nd point → done (simple, reliable)
 let _lastMeasureTap = 0;
-function onMeasurePointer(e) {
-  if (measureMode !== 'calibrate' && measureMode !== 'measure') return;
-  if (e.touches && e.touches.length > 1) return;
-  // debounce double events (touchend + pointerup)
-  const now = Date.now();
-  if (now - _lastMeasureTap < 280) return;
-  _lastMeasureTap = now;
 
-  try { e.preventDefault(); e.stopPropagation(); } catch (err) {}
-  const src = (e.changedTouches && e.changedTouches[0]) || (e.touches && e.touches[0]) || e;
-  if (!src || src.clientX == null) return;
-  const pt = contentPointFromEvent(src);
-  if (!pt) { status('Tap non rilevato'); return; }
-
-  if (!measurePending) {
-    measurePending = { x: pt.x, y: pt.y };
-    status('1° punto OK — tocca il 2°');
-    redrawMeasures();
-    updateMeasureInfo();
-    return;
+function confirmMeasurePoint() {
+  if (!measureEdit) return;
+  if (measureEdit.step === 1) {
+    measurePending = { x: measureEdit.x, y: measureEdit.y };
+    measureEdit = null;
+    status('1° punto confermato — posiziona il 2°');
+  } else {
+    if (!measurePending) { measureEdit = null; redrawMeasures(); return; }
+    const x1 = measurePending.x, y1 = measurePending.y;
+    const x2 = measureEdit.x, y2 = measureEdit.y;
+    measureEdit = null;
+    measurePending = null;
+    finishSegment(x1, y1, x2, y2);
   }
-  const x1 = measurePending.x, y1 = measurePending.y;
-  measurePending = null;
-  finishSegment(x1, y1, pt.x, pt.y);
+  redrawMeasures();
   updateMeasureInfo();
 }
-function onMeasureStart(e) { onMeasurePointer(e); }
-function onMeasureMove(e) {}
-function onMeasureEnd(e) {}
-function onMeasureTap(e) { onMeasurePointer(e); }
-function confirmMeasurePoint() {}
 function cancelMeasurePoint() {
-  measurePending = null;
   measureEdit = null;
+  measureDragging = false;
+  // keep measurePending if cancelling only the 2nd edit
   redrawMeasures();
   updateMeasureInfo();
   status('Punto annullato');
 }
+function placeOrMoveEdit(clientX, clientY) {
+  const pt = contentPointFromEvent({ clientX, clientY });
+  if (!pt) return;
+  if (measureEdit) {
+    measureEdit.x = pt.x;
+    measureEdit.y = pt.y;
+  } else {
+    const step = measurePending ? 2 : 1;
+    measureEdit = { x: pt.x, y: pt.y, step };
+  }
+  redrawMeasures();
+  updateMeasureInfo();
+}
+function onMeasurePointer(e) {
+  if (measureMode !== 'calibrate' && measureMode !== 'measure') return;
+  if (e.touches && e.touches.length > 1) return;
+  // For click: place or move current edit point (then user presses OK)
+  if (e.type === 'click' || e.type === 'touchend') {
+    const now = Date.now();
+    if (now - _lastMeasureTap < 250) return;
+    _lastMeasureTap = now;
+    try { e.preventDefault(); e.stopPropagation(); } catch (err) {}
+    const src = (e.changedTouches && e.changedTouches[0]) || e;
+    if (!src || src.clientX == null) return;
+    placeOrMoveEdit(src.clientX, src.clientY);
+    status(measureEdit ? ('Sposta la X, poi OK punto (' + (measureEdit.step === 1 ? '1°' : '2°') + ')') : '');
+  }
+}
+function onMeasureStart(e) {
+  if (measureMode !== 'calibrate' && measureMode !== 'measure') return;
+  if (e.touches && e.touches.length > 1) return;
+  if (!measureEdit) return;
+  try { e.preventDefault(); } catch (err) {}
+  const src = e.touches ? e.touches[0] : e;
+  if (!src) return;
+  measureDragging = true;
+  placeOrMoveEdit(src.clientX, src.clientY);
+}
+function onMeasureMove(e) {
+  if (!measureDragging || !measureEdit) return;
+  if (e.touches && e.touches.length > 1) return;
+  try { e.preventDefault(); } catch (err) {}
+  const src = e.touches ? e.touches[0] : e;
+  if (!src) return;
+  placeOrMoveEdit(src.clientX, src.clientY);
+}
+function onMeasureEnd(e) {
+  if (measureDragging) {
+    measureDragging = false;
+    try { e.preventDefault(); } catch (err) {}
+  }
+}
+function onMeasureTap(e) { onMeasurePointer(e); }
+
 
 
 let pdfDoc = null;
@@ -1423,10 +1471,17 @@ function initDocViewerUI() {
     el.__measureBound = true;
     el.addEventListener('click', onMeasurePointer, true);
     el.addEventListener('touchend', onMeasurePointer, { passive: false, capture: true });
+    el.addEventListener('touchstart', onMeasureStart, { passive: false, capture: true });
+    el.addEventListener('touchmove', onMeasureMove, { passive: false, capture: true });
+    el.addEventListener('touchend', onMeasureEnd, { passive: false, capture: true });
   };
   bindMeasureTarget(document.getElementById('docMeasureHit'));
   bindMeasureTarget(document.getElementById('docPdfCanvas'));
   bindMeasureTarget(document.getElementById('docZoomWrap'));
+  document.getElementById('btnPointOk')?.addEventListener('click', e => {
+    e.preventDefault(); e.stopPropagation();
+    confirmMeasurePoint();
+  });
   document.getElementById('btnPointCancel')?.addEventListener('click', e => {
     e.preventDefault(); e.stopPropagation();
     cancelMeasurePoint();
