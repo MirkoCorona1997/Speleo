@@ -724,17 +724,20 @@ async function updateDocReadyLabels(codice) {
 }
 function applyDocZoom() {
   const wrap = document.getElementById('docZoomWrap');
-  const img = document.getElementById('docImg');
   const scroll = document.getElementById('docScroll');
   if (!wrap) return;
-  docZoom = Math.max(1, Math.min(5, docZoom));
+  docZoom = Math.max(1, Math.min(6, Number(docZoom) || 1));
   wrap.style.transformOrigin = '0 0';
-  wrap.style.transform = docZoom === 1 ? 'none' : `scale(${docZoom})`;
-  wrap.style.width = docZoom === 1 ? '100%' : (100 / docZoom) + '%';
-  if (img && img.naturalWidth) {
-    // natural size scaling via CSS width 100% of wrap
-    img.style.width = '100%';
-    img.style.height = 'auto';
+  if (docZoom === 1) {
+    wrap.style.transform = 'none';
+    wrap.style.width = '100%';
+  } else {
+    wrap.style.transform = 'scale(' + docZoom + ')';
+    wrap.style.width = (100 / docZoom) + '%';
+  }
+  if (scroll) {
+    scroll.style.overflow = 'auto';
+    scroll.style.webkitOverflowScrolling = 'touch';
   }
   resizeMeasureSvg();
   redrawMeasures();
@@ -987,56 +990,87 @@ let pdfPageNum = 1;
 let pdfRenderScale = 1.5;
 let pdfRendering = false;
 
+
 function setupPdfJs() {
-  if (window.pdfjsLib) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdf.worker.min.js';
+  const lib = window.pdfjsLib || window['pdfjs-dist/build/pdf'];
+  if (!lib) return null;
+  try {
+    // Absolute worker URL (works on GitHub Pages subpaths)
+    lib.GlobalWorkerOptions.workerSrc = new URL('pdf.worker.min.js', window.location.href).href;
+  } catch (e) {
+    try { lib.GlobalWorkerOptions.workerSrc = 'pdf.worker.min.js'; } catch (e2) {}
   }
+  return lib;
 }
 
 async function renderPdfPage() {
   const canvas = document.getElementById('docPdfCanvas');
   const img = document.getElementById('docImg');
   const empty = document.getElementById('docImgEmpty');
+  const scroll = document.getElementById('docScroll');
   if (!pdfDoc || !canvas) return;
   if (pdfRendering) return;
   pdfRendering = true;
   try {
     const page = await pdfDoc.getPage(pdfPageNum);
-    // High-res base scale for crisp zoom
-    const base = pdfRenderScale * (window.devicePixelRatio || 1);
-    const viewport = page.getViewport({ scale: base });
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    canvas.style.width = '100%';
-    canvas.style.height = 'auto';
+    const unscaled = page.getViewport({ scale: 1 });
+    const containerW = Math.max(
+      (scroll && scroll.clientWidth) || 0,
+      (document.getElementById('docZoomWrap') && document.getElementById('docZoomWrap').clientWidth) || 0,
+      window.innerWidth || 320
+    );
+    // Render at 2× CSS width for sharp zoom
+    const cssWidth = containerW;
+    const scale = (cssWidth / unscaled.width) * 2;
+    const viewport = page.getViewport({ scale });
+    const ctx = canvas.getContext('2d', { alpha: false });
+    canvas.width = Math.floor(viewport.width);
+    canvas.height = Math.floor(viewport.height);
+    const cssHeight = Math.floor(cssWidth * (unscaled.height / unscaled.width));
     canvas.style.display = 'block';
+    canvas.style.width = cssWidth + 'px';
+    canvas.style.height = cssHeight + 'px';
+    canvas.style.maxWidth = 'none';
+    canvas.style.background = '#fff';
     if (img) img.style.display = 'none';
     if (empty) empty.style.display = 'none';
-    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
     await page.render({ canvasContext: ctx, viewport }).promise;
+    status('PDF pagina ' + pdfPageNum + (pdfDoc.numPages > 1 ? ('/' + pdfDoc.numPages) : ''));
     requestAnimationFrame(() => {
       applyDocZoom();
       resizeMeasureSvg();
       redrawMeasures();
     });
   } catch (e) {
-    console.error(e);
-    status('Errore rendering PDF');
+    console.error('renderPdfPage', e);
+    status('Errore rendering: ' + (e.message || e));
   }
   pdfRendering = false;
 }
 
 async function loadPdfFromBlob(blob) {
-  setupPdfJs();
-  if (!window.pdfjsLib) {
-    status('pdf.js non disponibile');
+  const lib = setupPdfJs();
+  if (!lib) {
+    status('pdf.js non caricato — ricarica l\'app');
     return false;
   }
+  status('Caricamento PDF…');
   const data = await blob.arrayBuffer();
-  pdfDoc = await pdfjsLib.getDocument({ data }).promise;
+  // disableWorker: more reliable on iOS Safari
+  let task;
+  try {
+    task = lib.getDocument({ data: data.slice(0), disableWorker: true });
+    pdfDoc = await task.promise;
+  } catch (e1) {
+    console.warn('PDF no-worker failed, retry with worker', e1);
+    task = lib.getDocument({ data: data.slice(0) });
+    pdfDoc = await task.promise;
+  }
   pdfPageNum = 1;
   await renderPdfPage();
-  status('PDF caricato — ' + pdfDoc.numPages + ' pag.');
+  status('PDF pronto' + (pdfDoc.numPages > 1 ? (' · ' + pdfDoc.numPages + ' pagine') : ''));
   return true;
 }
 
@@ -1082,32 +1116,41 @@ async function openMeasureWorkspace(pdfUrl, codice) {
   measureDraft = null;
   setMeasureMode('pan');
 
-  // Load saved PDF/image if any
   const canvas = document.getElementById('docPdfCanvas');
-  if (canvas) canvas.style.display = 'none';
+  if (canvas) { canvas.style.display = 'none'; canvas.width = 0; canvas.height = 0; }
   if (img) { img.removeAttribute('src'); img.style.display = 'none'; }
+  if (empty) empty.style.display = 'block';
   const blob = docCurrentCodice ? await loadRilievoImage(docCurrentCodice) : null;
   if (blob) {
-    const type = blob.type || '';
-    if (type.includes('pdf') || type === 'application/octet-stream' || (blob.name && /\.pdf$/i.test(blob.name))) {
-      await loadPdfFromBlob(blob);
-      status('PDF offline caricato');
-    } else {
-      if (empty) empty.style.display = 'none';
-      if (img) {
+    const type = (blob.type || '').toLowerCase();
+    const asPdf = type.includes('pdf') || type === 'application/octet-stream' || type === '';
+    try {
+      if (asPdf) {
+        // try PDF first, fallback image
+        try {
+          await loadPdfFromBlob(blob);
+        } catch (ePdf) {
+          if (img) {
+            img.src = URL.createObjectURL(blob);
+            img.style.display = 'block';
+            if (empty) empty.style.display = 'none';
+          }
+        }
+      } else if (img) {
         img.onload = () => {
           img.style.display = 'block';
+          if (empty) empty.style.display = 'none';
           applyDocZoom();
           resizeMeasureSvg();
           redrawMeasures();
         };
         img.src = URL.createObjectURL(blob);
-        img.style.display = 'block';
       }
-      status('Rilievo offline caricato');
+    } catch (e) {
+      if (empty) empty.style.display = 'block';
+      status('File offline non leggibile');
     }
   } else {
-    if (empty) empty.style.display = 'block';
     status('Importa il PDF del rilievo');
   }
   requestAnimationFrame(() => { applyDocZoom(); resizeMeasureSvg(); redrawMeasures(); });
@@ -1140,35 +1183,37 @@ function initDocViewerUI() {
     if (!file) return;
     const empty = document.getElementById('docImgEmpty');
     const img = document.getElementById('docImg');
-    const isPdf = (file.type === 'application/pdf') || /\.pdf$/i.test(file.name || '');
+    const name = (file.name || '').toLowerCase();
+    const isPdf = file.type === 'application/pdf' || name.endsWith('.pdf') || file.type === '' && name.endsWith('.pdf');
+    status('Apertura file…');
     if (empty) empty.style.display = 'none';
-    if (isPdf) {
-      try {
-        await loadPdfFromBlob(file);
-      } catch (err) {
-        console.error(err);
-        status('PDF non leggibile');
-        ev.target.value = '';
-        return;
-      }
-    } else {
-      const canvas = document.getElementById('docPdfCanvas');
-      if (canvas) canvas.style.display = 'none';
-      if (img) {
-        img.onload = () => {
+    try {
+      if (isPdf || name.endsWith('.pdf')) {
+        const ok = await loadPdfFromBlob(file);
+        if (!ok) throw new Error('load failed');
+      } else {
+        const canvas = document.getElementById('docPdfCanvas');
+        if (canvas) canvas.style.display = 'none';
+        if (img) {
+          img.onload = () => {
+            img.style.display = 'block';
+            applyDocZoom();
+            resizeMeasureSvg();
+            redrawMeasures();
+          };
+          img.src = URL.createObjectURL(file);
           img.style.display = 'block';
-          applyDocZoom();
-          resizeMeasureSvg();
-          redrawMeasures();
-        };
-        img.src = URL.createObjectURL(file);
+        }
+        status('Immagine caricata');
       }
-    }
-    if (docCurrentCodice) {
-      const ok = await saveRilievoImage(docCurrentCodice, file);
-      status(ok ? (isPdf ? 'PDF salvato offline ✓' : 'Foto salvata offline ✓') : 'File caricato');
-    } else {
-      status(isPdf ? 'PDF caricato' : 'Foto caricata');
+      if (docCurrentCodice) {
+        await saveRilievoImage(docCurrentCodice, file);
+        status((isPdf || name.endsWith('.pdf')) ? 'PDF salvato offline ✓' : 'Foto salvata offline ✓');
+      }
+    } catch (err) {
+      console.error(err);
+      status('File non leggibile: ' + (err.message || 'errore'));
+      if (empty) empty.style.display = 'block';
     }
     ev.target.value = '';
   });
