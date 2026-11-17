@@ -707,23 +707,8 @@ async function ensureDocCached(url, codice, key) {
   }
 }
 async function updateDocReadyLabels(codice) {
-  const list = csrDocUrls(codice);
-  let ready = 0;
-  for (const d of list) {
-    const a = document.querySelector(`#cardActions [data-csr-key="${d.key}"]`);
-    if (!a) continue;
-    const cached = isDocMarkedReady(codice, d.key) || await isDocCached(d.url);
-    if (cached) {
-      ready++;
-      markDocReady(codice, d.key);
-      a.textContent = d.label + ' ✓';
-      a.style.boxShadow = 'inset 0 0 0 1px #3dcfb0';
-    } else {
-      a.textContent = d.label;
-      a.style.boxShadow = '';
-    }
-  }
-  return ready;
+  /* no visual offline checkmarks on document buttons */
+  return 0;
 }
 function applyDocZoom(focal) {
   // focal: {clientX, clientY} optional — zoom centered on that screen point
@@ -1440,13 +1425,11 @@ function openCard(f){
   if (docsList.length) {
     docsList.forEach(d => {
       const cls = d.key === 'scheda' ? 'ba' : 'bb';
-      const ready = isDocMarkedReady(codice, d.key);
-      const label = d.label + (ready ? ' ✓' : '');
       if (d.key === 'rilievo') {
-        docs += `<button type="button" class="${cls}" id="btnRilievo" data-url="${d.url}" style="${ready ? 'box-shadow:inset 0 0 0 1px #3dcfb0' : ''}">${label}</button>`;
+        docs += `<button type="button" class="${cls}" id="btnRilievo" data-url="${d.url}">${d.label}</button>`;
         docs += `<button type="button" class="bb" id="btnMisuraRilievo" data-url="${d.url}">Misura rilievo</button>`;
       } else {
-        docs += `<a class="${cls}" href="${d.url}" target="_blank" rel="noopener noreferrer" data-csr-key="${d.key}" style="${ready ? 'box-shadow:inset 0 0 0 1px #3dcfb0' : ''}">${label}</a>`;
+        docs += `<a class="${cls}" href="${d.url}" target="_blank" rel="noopener noreferrer" data-csr-key="${d.key}">${d.label}</a>`;
       }
     });
   } else {
@@ -1487,14 +1470,11 @@ function openCard(f){
       const url = a.href;
       setTimeout(() => {
         if (codice && key) {
-          markDocReady(codice, key);
           try { caches.open(DOC_CACHE_NAME).then(c => c.add(url).catch(() => {})); } catch (err) {}
-          updateDocReadyLabels(codice);
         }
       }, 1500);
     }, true);
   });
-  if (codice) updateDocReadyLabels(codice);
   refreshFavIds().then(() => {
     const b = document.getElementById('saveBtn');
     if (b && cur && cur.properties && String(cur.properties.id_ost) === String(p.id_ost)) {
