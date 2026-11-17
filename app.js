@@ -1147,23 +1147,42 @@ async function renderPdfPage() {
 async function loadPdfFromBlob(blob) {
   const lib = setupPdfJs();
   if (!lib) {
-    status('pdf.js non caricato — ricarica l\'app');
+    status('pdf.js non caricato — ricarica l\'app online');
     return false;
   }
   status('Caricamento PDF…');
-  const data = await blob.arrayBuffer();
-  // disableWorker: more reliable on iOS Safari
+  let data;
+  try {
+    data = await blob.arrayBuffer();
+  } catch (e) {
+    data = await new Promise((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res(fr.result);
+      fr.onerror = () => rej(fr.error || new Error('FileReader'));
+      fr.readAsArrayBuffer(blob);
+    });
+  }
+  if (!data || data.byteLength < 100) throw new Error('file vuoto o troppo piccolo');
+  // Check PDF magic
+  const head = new Uint8Array(data.slice(0, 5));
+  const magic = String.fromCharCode.apply(null, head);
+  if (magic.indexOf('%PDF') !== 0) {
+    // might still be PDF with BOM — try anyway
+    status('Avviso: header non standard, provo comunque…');
+  }
   let task;
   try {
-    task = lib.getDocument({ data: data.slice(0), disableWorker: true });
+    task = lib.getDocument({ data: data.slice(0), disableWorker: true, useSystemFonts: true });
     pdfDoc = await task.promise;
   } catch (e1) {
-    console.warn('PDF no-worker failed, retry with worker', e1);
+    console.warn('PDF retry with worker', e1);
     task = lib.getDocument({ data: data.slice(0) });
     pdfDoc = await task.promise;
   }
   pdfPageNum = 1;
   await renderPdfPage();
+  const canvas = document.getElementById('docPdfCanvas');
+  if (!canvas || canvas.width < 10) throw new Error('canvas vuoto dopo render');
   status('PDF pronto' + (pdfDoc.numPages > 1 ? (' · ' + pdfDoc.numPages + ' pagine') : ''));
   return true;
 }
@@ -1283,47 +1302,57 @@ function initDocViewerUI() {
     if (docCurrentUrl) window.open(docCurrentUrl, '_blank', 'noopener,noreferrer');
     else status('URL rilievo non disponibile');
   });
-  document.getElementById('btnImportImg')?.addEventListener('click', () => {
-    document.getElementById('docImgInput')?.click();
-  });
+  // Import uses <label for="docImgInput"> — native picker (works on iOS)
   document.getElementById('docImgInput')?.addEventListener('change', async ev => {
     const file = ev.target.files && ev.target.files[0];
-    if (!file) return;
+    if (!file) {
+      status('Nessun file scelto');
+      return;
+    }
     const empty = document.getElementById('docImgEmpty');
     const img = document.getElementById('docImg');
     const name = (file.name || '').toLowerCase();
-    const isPdf = file.type === 'application/pdf' || name.endsWith('.pdf') || file.type === '' && name.endsWith('.pdf');
-    status('Apertura file…');
+    const type = (file.type || '').toLowerCase();
+    const isPdf = type.includes('pdf') || name.endsWith('.pdf') || type === 'application/octet-stream';
+    status('File: ' + (file.name || 'senza nome') + ' (' + Math.round(file.size/1024) + ' KB)…');
     if (empty) empty.style.display = 'none';
     try {
-      if (isPdf || name.endsWith('.pdf')) {
+      if (!window.pdfjsLib && isPdf) {
+        setupPdfJs();
+      }
+      if (isPdf) {
+        if (!window.pdfjsLib) throw new Error('pdf.js non caricato — ricarica l\'app online');
         const ok = await loadPdfFromBlob(file);
-        if (!ok) throw new Error('load failed');
+        if (!ok) throw new Error('rendering fallito');
+        status('PDF caricato ✓');
       } else {
         const canvas = document.getElementById('docPdfCanvas');
         if (canvas) canvas.style.display = 'none';
         if (img) {
-          img.onload = () => {
+          await new Promise((res, rej) => {
+            img.onload = () => { img.style.display = 'block'; res(); };
+            img.onerror = () => rej(new Error('immagine non valida'));
+            img.src = URL.createObjectURL(file);
             img.style.display = 'block';
-            applyDocZoom();
-            resizeMeasureSvg();
-            redrawMeasures();
-          };
-          img.src = URL.createObjectURL(file);
-          img.style.display = 'block';
+          });
+          applyDocZoom();
+          resizeMeasureSvg();
+          redrawMeasures();
         }
-        status('Immagine caricata');
+        status('Immagine caricata ✓');
       }
       if (docCurrentCodice) {
-        await saveRilievoImage(docCurrentCodice, file);
-        status((isPdf || name.endsWith('.pdf')) ? 'PDF salvato offline ✓' : 'Foto salvata offline ✓');
+        try { await saveRilievoImage(docCurrentCodice, file); } catch (e) {}
       }
     } catch (err) {
       console.error(err);
-      status('File non leggibile: ' + (err.message || 'errore'));
+      const msg = (err && err.message) ? err.message : 'errore';
+      status('Errore: ' + msg);
+      try { alert('Impossibile aprire il file:\n' + msg); } catch (e) {}
       if (empty) empty.style.display = 'block';
     }
-    ev.target.value = '';
+    // allow re-selecting same file
+    try { ev.target.value = ''; } catch (e) {}
   });
   document.getElementById('btnCalibrate')?.addEventListener('click', () => setMeasureMode('calibrate'));
   document.getElementById('btnMeasure')?.addEventListener('click', () => {
