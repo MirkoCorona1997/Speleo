@@ -649,9 +649,11 @@ let docCurrentKey = null;
 let docIsRilievo = false;
 let measureMode = 'pan'; // pan | calibrate | measure
 let measureScale = null; // meters per pixel at zoom 1 content coords
-let measureDraft = null; // {x1,y1,x2,y2} while placing second point
-let measurePending = null; // {x,y} first tap waiting for second
-let measureItems = []; // {id,x1,y1,x2,y2,meters,label}
+let measureDraft = null;
+let measurePending = null; // confirmed first point {x,y}
+let measureEdit = null; // movable point being adjusted {x,y, step:1|2}
+let measureDragging = false;
+let measureItems = [];
 let measureIdSeq = 1;
 
 function csrDocUrls(codice) {
@@ -727,7 +729,7 @@ function applyDocZoom() {
   const wrap = document.getElementById('docZoomWrap');
   const scroll = document.getElementById('docScroll');
   if (!wrap) return;
-  docZoom = Math.max(1, Math.min(6, Number(docZoom) || 1));
+  docZoom = Math.max(0.5, Math.min(20, Number(docZoom) || 1));
   wrap.style.transformOrigin = '0 0';
   if (docZoom === 1) {
     wrap.style.transform = 'none';
@@ -822,7 +824,7 @@ function redrawMeasures() {
   const svg = document.getElementById('docMeasureSvg');
   if (!svg) return;
   while (svg.firstChild) svg.removeChild(svg.firstChild);
-  const arm = 5; // half-size of X in content px (stays small while zoomed via same coords)
+  const arm = 3.2; // small X cursor
   function drawX(x, y, color) {
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     [[-arm, -arm, arm, arm], [-arm, arm, arm, -arm]].forEach(([x1,y1,x2,y2]) => {
@@ -870,12 +872,14 @@ function redrawMeasures() {
       svg.appendChild(label);
     }
   });
-  // pending first point alone
-  if (measurePending) {
-    drawX(measurePending.x, measurePending.y, '#f5b942');
-  }
+  if (measurePending) drawX(measurePending.x, measurePending.y, '#3dcfb0');
+  if (measureEdit) drawX(measureEdit.x, measureEdit.y, '#f5b942');
   renderMeasureList();
   updateMeasureInfo();
+  const okBtn = document.getElementById('btnPointOk');
+  const cancelBtn = document.getElementById('btnPointCancel');
+  if (okBtn) okBtn.style.display = measureEdit ? 'inline-flex' : 'none';
+  if (cancelBtn) cancelBtn.style.display = measureEdit ? 'inline-flex' : 'none';
 }
 function renderMeasureList() {
   const el = document.getElementById('docMeasureList');
@@ -910,11 +914,16 @@ function renderMeasureList() {
 function updateMeasureInfo() {
   const info = document.getElementById('docMeasureInfo');
   if (!info) return;
-  if (measureMode === 'calibrate') {
-    info.textContent = measurePending ? 'Secondo tap: fine riferimento scala' : 'Primo tap: inizio riferimento scala';
-  } else if (measureMode === 'measure') {
-    if (!measureScale) info.textContent = 'Prima imposta la scala';
-    else info.textContent = measurePending ? 'Secondo tap: fine misura' : 'Primo tap: inizio misura';
+  if (measureMode === 'calibrate' || measureMode === 'measure') {
+    if (measureEdit) {
+      info.textContent = 'Sposta la X, poi OK punto (' + (measureEdit.step === 1 ? '1°' : '2°') + ')';
+    } else if (measurePending) {
+      info.textContent = 'Tocca per il 2° punto, poi spostalo e OK';
+    } else {
+      info.textContent = measureMode === 'calibrate'
+        ? 'Tocca per il 1° punto della scala'
+        : (measureScale ? 'Tocca per il 1° punto di misura' : 'Prima imposta la scala');
+    }
   } else {
     info.textContent = measureScale
       ? ('Scala ok · ' + measureItems.filter(x=>!x.calib).length + ' misure')
@@ -925,6 +934,8 @@ function setMeasureMode(mode) {
   measureMode = mode;
   measurePending = null;
   measureDraft = null;
+  measureEdit = null;
+  measureDragging = false;
   const hit = document.getElementById('docMeasureHit');
   if (hit) hit.style.display = (mode === 'calibrate' || mode === 'measure') ? 'block' : 'none';
   const scroll = document.getElementById('docScroll');
@@ -950,7 +961,7 @@ function contentPointFromEvent(e) {
 }
 function finishSegment(x1, y1, x2, y2) {
   const dist = pxDist(x1, y1, x2, y2);
-  if (dist < 2) { status('Punti troppo vicini'); return; }
+  if (dist < 1) { status('Punti troppo vicini'); return; }
   if (measureMode === 'calibrate') {
     const metersStr = prompt('Quanti metri corrisponde nella realtà questo segmento?', '1');
     if (metersStr == null) return;
@@ -964,6 +975,8 @@ function finishSegment(x1, y1, x2, y2) {
       meters, calib: true, label: 'Scala ' + formatMeters(meters)
     });
     saveMeasures();
+    measurePending = null;
+    measureEdit = null;
     setMeasureMode('measure');
     status('Scala: ' + formatMeters(meters));
   } else if (measureMode === 'measure') {
@@ -975,36 +988,84 @@ function finishSegment(x1, y1, x2, y2) {
       meters, label: formatMeters(meters)
     });
     saveMeasures();
+    measurePending = null;
+    measureEdit = null;
     status('Misura: ' + formatMeters(meters));
   }
   redrawMeasures();
 }
+function confirmMeasurePoint() {
+  if (!measureEdit) return;
+  if (measureEdit.step === 1) {
+    measurePending = { x: measureEdit.x, y: measureEdit.y };
+    measureEdit = null;
+    status('1° punto OK — tocca per il 2°');
+  } else {
+    if (!measurePending) { measureEdit = null; redrawMeasures(); return; }
+    const x1 = measurePending.x, y1 = measurePending.y;
+    const x2 = measureEdit.x, y2 = measureEdit.y;
+    measureEdit = null;
+    measurePending = null;
+    finishSegment(x1, y1, x2, y2);
+  }
+  redrawMeasures();
+  updateMeasureInfo();
+}
+function cancelMeasurePoint() {
+  measureEdit = null;
+  measureDragging = false;
+  redrawMeasures();
+  updateMeasureInfo();
+}
 function onMeasureTap(e) {
   if (measureMode !== 'calibrate' && measureMode !== 'measure') return;
+  // If already editing, taps move the point (handled by drag); ignore extra place
+  if (measureEdit) return;
   e.preventDefault();
   e.stopPropagation();
   const src = e.changedTouches ? e.changedTouches[0] : e;
   const pt = contentPointFromEvent(src);
   if (!pt) return;
-  if (!measurePending) {
-    measurePending = { x: pt.x, y: pt.y };
-    measureDraft = null;
-    redrawMeasures();
-    updateMeasureInfo();
-    return;
-  }
-  const x1 = measurePending.x, y1 = measurePending.y;
-  measurePending = null;
-  measureDraft = null;
-  finishSegment(x1, y1, pt.x, pt.y);
+  const step = measurePending ? 2 : 1;
+  measureEdit = { x: pt.x, y: pt.y, step };
+  redrawMeasures();
   updateMeasureInfo();
 }
-// legacy names used by initDocViewerUI
-function onMeasureStart(e) { /* two-tap: ignore drag start */ }
-function onMeasureMove(e) { /* two-tap: no drag */ }
-function onMeasureEnd(e) {
+function onMeasureStart(e) {
   if (measureMode !== 'calibrate' && measureMode !== 'measure') return;
-  onMeasureTap(e);
+  if (!measureEdit) return;
+  e.preventDefault();
+  const src = e.touches ? e.touches[0] : e;
+  const pt = contentPointFromEvent(src);
+  if (!pt) return;
+  // start drag if near current edit point (~30px content)
+  const d = pxDist(pt.x, pt.y, measureEdit.x, measureEdit.y);
+  if (d < 40 / Math.max(docZoom, 1)) {
+    measureDragging = true;
+    measureEdit.x = pt.x;
+    measureEdit.y = pt.y;
+    redrawMeasures();
+  }
+}
+function onMeasureMove(e) {
+  if (!measureDragging || !measureEdit) return;
+  e.preventDefault();
+  const src = e.touches ? e.touches[0] : e;
+  const pt = contentPointFromEvent(src);
+  if (!pt) return;
+  measureEdit.x = pt.x;
+  measureEdit.y = pt.y;
+  redrawMeasures();
+}
+function onMeasureEnd(e) {
+  if (measureDragging) {
+    measureDragging = false;
+    e.preventDefault();
+    redrawMeasures();
+    return;
+  }
+  // no active edit → treat as place tap
+  if (!measureEdit) onMeasureTap(e);
 }
 
 
@@ -1042,38 +1103,35 @@ async function renderPdfPage() {
       (document.getElementById('docZoomWrap') && document.getElementById('docZoomWrap').clientWidth) || 0,
       window.innerWidth || 320
     );
-    // High-res: ~5× screen width so zoom max stays sharp
+    // Near-original resolution: aim ~300 DPI equivalent, cap ~25MP for iOS
     const cssWidth = containerW;
-    const quality = Math.min(5, Math.max(3, (window.devicePixelRatio || 1) * 3));
-    const scale = (cssWidth / unscaled.width) * quality;
-    const viewport = page.getViewport({ scale });
-    const ctx = canvas.getContext('2d', { alpha: false });
-    // Cap pixel size ~16MP to avoid iOS memory kill
-    let cw = Math.floor(viewport.width), ch = Math.floor(viewport.height);
-    const maxPix = 16e6;
+    const cssHeight = Math.floor(cssWidth * (unscaled.height / unscaled.width));
+    // Prefer high internal pixels: 4–8 × CSS width
+    let targetScale = Math.max(4, Math.min(8, (window.devicePixelRatio || 2) * 4));
+    let fitScale = (cssWidth / unscaled.width) * targetScale;
+    let cw = Math.floor(unscaled.width * fitScale);
+    let ch = Math.floor(unscaled.height * fitScale);
+    const maxPix = 25e6;
     if (cw * ch > maxPix) {
       const f = Math.sqrt(maxPix / (cw * ch));
-      cw = Math.floor(cw * f);
-      ch = Math.floor(ch * f);
+      fitScale *= f;
+      cw = Math.floor(unscaled.width * fitScale);
+      ch = Math.floor(unscaled.height * fitScale);
     }
+    const fitVp = page.getViewport({ scale: fitScale });
+    const ctx = canvas.getContext('2d', { alpha: false });
     canvas.width = cw;
     canvas.height = ch;
-    const cssHeight = Math.floor(cssWidth * (unscaled.height / unscaled.width));
     canvas.style.display = 'block';
     canvas.style.width = cssWidth + 'px';
     canvas.style.height = cssHeight + 'px';
     canvas.style.maxWidth = 'none';
     canvas.style.background = '#fff';
-    // If we capped pixels, recompute viewport to match canvas
-    const v2 = page.getViewport({ scale: scale * (cw / Math.floor(viewport.width)) });
     if (img) img.style.display = 'none';
     if (empty) empty.style.display = 'none';
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    const renderVp = page.getViewport({ scale: (cssWidth / unscaled.width) * quality * (cw / (unscaled.width * (cssWidth / unscaled.width) * quality)) });
-    // simpler: scale so viewport matches canvas pixel size
-    const fitScale = cw / unscaled.width;
-    const fitVp = page.getViewport({ scale: fitScale });
+    status('Rendering PDF alta qualità…');
     await page.render({ canvasContext: ctx, viewport: fitVp }).promise;
     status('PDF pagina ' + pdfPageNum + (pdfDoc.numPages > 1 ? ('/' + pdfDoc.numPages) : ''));
     requestAnimationFrame(() => {
@@ -1206,8 +1264,8 @@ window.appCloseDoc = closeDocViewer;
 
 function initDocViewerUI() {
   document.getElementById('docClose')?.addEventListener('click', closeDocViewer);
-  document.getElementById('docZoomIn')?.addEventListener('click', () => { docZoom += 0.25; applyDocZoom(); });
-  document.getElementById('docZoomOut')?.addEventListener('click', () => { docZoom -= 0.25; applyDocZoom(); });
+  document.getElementById('docZoomIn')?.addEventListener('click', () => { docZoom = Math.min(20, docZoom * 1.35); applyDocZoom(); status('Zoom ' + docZoom.toFixed(1) + '×'); });
+  document.getElementById('docZoomOut')?.addEventListener('click', () => { docZoom = Math.max(0.5, docZoom / 1.35); applyDocZoom(); status('Zoom ' + docZoom.toFixed(1) + '×'); });
   document.getElementById('docZoomReset')?.addEventListener('click', () => { docZoom = 1; applyDocZoom(); });
   document.getElementById('btnOpenPdf')?.addEventListener('click', () => {
     if (docCurrentUrl) window.open(docCurrentUrl, '_blank', 'noopener,noreferrer');
@@ -1277,9 +1335,25 @@ function initDocViewerUI() {
   });
   const hit = document.getElementById('docMeasureHit');
   if (hit) {
-    hit.addEventListener('click', onMeasureTap);
-    hit.addEventListener('touchend', onMeasureTap, { passive: false });
+    hit.addEventListener('pointerdown', onMeasureStart);
+    hit.addEventListener('pointermove', onMeasureMove);
+    hit.addEventListener('pointerup', onMeasureEnd);
+    hit.addEventListener('touchstart', onMeasureStart, { passive: false });
+    hit.addEventListener('touchmove', onMeasureMove, { passive: false });
+    hit.addEventListener('touchend', onMeasureEnd, { passive: false });
+    hit.addEventListener('click', e => {
+      if (measureEdit) return; // placement via touchend/pointerup
+      onMeasureTap(e);
+    });
   }
+  document.getElementById('btnPointOk')?.addEventListener('click', e => {
+    e.preventDefault(); e.stopPropagation();
+    confirmMeasurePoint();
+  });
+  document.getElementById('btnPointCancel')?.addEventListener('click', e => {
+    e.preventDefault(); e.stopPropagation();
+    cancelMeasurePoint();
+  });
   const scroll = document.getElementById('docScroll');
   if (scroll) {
     scroll.addEventListener('touchstart', e => {
