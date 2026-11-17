@@ -710,13 +710,56 @@ async function updateDocReadyLabels(codice) {
   /* no visual offline checkmarks on document buttons */
   return 0;
 }
+let pdfZoomTimer = null;
 function applyDocZoom(focal) {
   const wrap = document.getElementById('docZoomWrap');
   const scroll = document.getElementById('docScroll');
+  const canvas = document.getElementById('docPdfCanvas');
   if (!wrap) return;
   const prevZ = Math.max(0.5, Math.min(25, Number(window.__prevDocZoom) || docZoom || 1));
   docZoom = Math.max(0.5, Math.min(25, Number(docZoom) || 1));
 
+  // PDF loaded: zoom = re-render from vector (always sharp)
+  const pdfMode = pdfDoc && canvas && canvas.style.display !== 'none' && canvas.width > 0;
+  if (pdfMode) {
+    // keep relative scroll position
+    let relX = 0.5, relY = 0.5;
+    if (scroll) {
+      const maxX = Math.max(1, scroll.scrollWidth - scroll.clientWidth);
+      const maxY = Math.max(1, scroll.scrollHeight - scroll.clientHeight);
+      relX = scroll.scrollLeft / maxX;
+      relY = scroll.scrollTop / maxY;
+      if (focal && focal.clientX != null) {
+        const rect = scroll.getBoundingClientRect();
+        relX = (scroll.scrollLeft + (focal.clientX - rect.left)) / Math.max(1, scroll.scrollWidth);
+        relY = (scroll.scrollTop + (focal.clientY - rect.top)) / Math.max(1, scroll.scrollHeight);
+      }
+    }
+    wrap.style.transform = 'none';
+    wrap.style.width = '100%';
+    window.__prevDocZoom = docZoom;
+    // debounce re-render during pinch
+    clearTimeout(pdfZoomTimer);
+    pdfZoomTimer = setTimeout(async () => {
+      try {
+        await renderPdfPage();
+        if (scroll) {
+          requestAnimationFrame(() => {
+            const maxX = Math.max(1, scroll.scrollWidth - scroll.clientWidth);
+            const maxY = Math.max(1, scroll.scrollHeight - scroll.clientHeight);
+            scroll.scrollLeft = relX * maxX;
+            scroll.scrollTop = relY * maxY;
+            resizeMeasureSvg();
+            redrawMeasures();
+          });
+        }
+      } catch (e) { console.error(e); }
+    }, 120);
+    status('Zoom ' + docZoom.toFixed(1) + '× (render nitido…)');
+    return;
+  }
+
+  // Image mode: CSS transform scale
   let contentX = null, contentY = null, ox = 0, oy = 0;
   if (scroll && focal && focal.clientX != null) {
     const rect = scroll.getBoundingClientRect();
@@ -725,9 +768,7 @@ function applyDocZoom(focal) {
     contentX = (scroll.scrollLeft + ox) / prevZ;
     contentY = (scroll.scrollTop + oy) / prevZ;
   }
-
   wrap.style.transformOrigin = '0 0';
-  wrap.style.willChange = 'transform';
   if (Math.abs(docZoom - 1) < 0.001) {
     wrap.style.transform = 'none';
     wrap.style.width = '100%';
@@ -739,11 +780,8 @@ function applyDocZoom(focal) {
     scroll.style.overflow = 'auto';
     scroll.style.webkitOverflowScrolling = 'touch';
     if (contentX != null) {
-      // keep focal content point under fingers
-      const nx = contentX * docZoom - ox;
-      const ny = contentY * docZoom - oy;
-      scroll.scrollLeft = nx;
-      scroll.scrollTop = ny;
+      scroll.scrollLeft = contentX * docZoom - ox;
+      scroll.scrollTop = contentY * docZoom - oy;
     }
   }
   window.__prevDocZoom = docZoom;
@@ -829,7 +867,7 @@ function redrawMeasures() {
   const svg = document.getElementById('docMeasureSvg');
   if (!svg) return;
   while (svg.firstChild) svg.removeChild(svg.firstChild);
-  const arm = Math.max(1.2, 3.5 / Math.max(docZoom, 1)); // ~3.5px on screen at any zoom
+  const arm = 3.5; // layout pixels (PDF zoom expands canvas, X stays readable)
   function drawX(x, y, color) {
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     [[-arm, -arm, arm, arm], [-arm, arm, arm, -arm]].forEach(([x1,y1,x2,y2]) => {
@@ -837,7 +875,7 @@ function redrawMeasures() {
       l.setAttribute('x1', x + x1); l.setAttribute('y1', y + y1);
       l.setAttribute('x2', x + x2); l.setAttribute('y2', y + y2);
       l.setAttribute('stroke', color);
-      l.setAttribute('stroke-width', String(Math.max(0.8, 1.1 / Math.max(docZoom, 1))));
+      l.setAttribute('stroke-width', '1.2');
       l.setAttribute('stroke-linecap', 'round');
       g.appendChild(l);
     });
@@ -891,7 +929,6 @@ function renderMeasureList() {
   if (!docIsRilievo || !measureItems.length) {
     el.style.display = 'none';
     el.innerHTML = '';
-    applyDocZoom();
     return;
   }
   el.style.display = 'block';
@@ -929,26 +966,40 @@ function updateMeasureInfo() {
       : 'Importa PDF, poi Scala / Misura';
   }
 }
+function syncMeasureHitLayer() {
+  const hit = document.getElementById('docMeasureHit');
+  const canvas = document.getElementById('docPdfCanvas');
+  const wrap = document.getElementById('docZoomWrap');
+  const svg = document.getElementById('docMeasureSvg');
+  if (!hit) return;
+  const show = (measureMode === 'calibrate' || measureMode === 'measure');
+  hit.style.display = show ? 'block' : 'none';
+  hit.style.pointerEvents = show ? 'auto' : 'none';
+  hit.style.position = 'absolute';
+  hit.style.left = '0';
+  hit.style.top = '0';
+  hit.style.zIndex = '20';
+  const w = (canvas && canvas.offsetWidth) || (wrap && wrap.offsetWidth) || 0;
+  const h = (canvas && canvas.offsetHeight) || (wrap && wrap.offsetHeight) || 0;
+  if (w && h) {
+    hit.style.width = w + 'px';
+    hit.style.height = h + 'px';
+    if (svg) {
+      svg.style.width = w + 'px';
+      svg.style.height = h + 'px';
+      svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+    }
+  }
+}
 function setMeasureMode(mode) {
   measureMode = mode;
   measurePending = null;
   measureDraft = null;
   measureEdit = null;
   measureDragging = false;
-  const hit = document.getElementById('docMeasureHit');
-  const canvas = document.getElementById('docPdfCanvas');
-  if (hit) {
-    const show = (mode === 'calibrate' || mode === 'measure');
-    hit.style.display = show ? 'block' : 'none';
-    hit.style.pointerEvents = show ? 'auto' : 'none';
-    // match canvas size so taps register on the PDF
-    if (canvas && canvas.offsetWidth) {
-      hit.style.width = canvas.offsetWidth + 'px';
-      hit.style.height = canvas.offsetHeight + 'px';
-    }
-  }
+  syncMeasureHitLayer();
   const scroll = document.getElementById('docScroll');
-  if (scroll) scroll.style.touchAction = (mode === 'pan') ? 'pan-x pan-y' : 'manipulation';
+  if (scroll) scroll.style.touchAction = (mode === 'pan') ? 'pan-x pan-y' : 'none';
   ['btnCalibrate','btnMeasure','btnMeasurePan'].forEach(id => {
     const b = document.getElementById(id);
     if (!b) return;
@@ -957,17 +1008,20 @@ function setMeasureMode(mode) {
     b.style.color = on ? '#08221c' : '#fff';
   });
   resizeMeasureSvg();
+  syncMeasureHitLayer();
   redrawMeasures();
   updateMeasureInfo();
-  status(mode === 'calibrate' ? 'SCALA: tocca 2 punti' : (mode === 'measure' ? 'MISURA: tocca 2 punti' : 'Scorri / zoom'));
+  status(mode === 'calibrate' ? 'SCALA: tocca 2 punti sul disegno' : (mode === 'measure' ? 'MISURA: tocca 2 punti sul disegno' : 'Scorri / zoom'));
 }
 function contentPointFromEvent(e) {
+  const canvas = document.getElementById('docPdfCanvas');
   const wrap = document.getElementById('docZoomWrap');
-  if (!wrap) return null;
-  const rect = wrap.getBoundingClientRect();
-  // account for CSS scale transform
-  const x = (e.clientX - rect.left) / docZoom;
-  const y = (e.clientY - rect.top) / docZoom;
+  const target = (canvas && canvas.style.display !== 'none' && canvas.offsetWidth) ? canvas : wrap;
+  if (!target) return null;
+  const rect = target.getBoundingClientRect();
+  // map screen → element local CSS pixels
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
   return { x, y };
 }
 function finishSegment(x1, y1, x2, y2) {
@@ -999,22 +1053,24 @@ function finishSegment(x1, y1, x2, y2) {
 }
 
 // Two taps: 1st point, 2nd point → done (simple, reliable)
+let _lastMeasureTap = 0;
 function onMeasurePointer(e) {
   if (measureMode !== 'calibrate' && measureMode !== 'measure') return;
-  // ignore multi-touch (pinch zoom)
   if (e.touches && e.touches.length > 1) return;
-  if (e.pointerType === 'touch' && e.type === 'pointerdown' && e.isPrimary === false) return;
-  e.preventDefault();
-  e.stopPropagation();
+  // debounce double events (touchend + pointerup)
+  const now = Date.now();
+  if (now - _lastMeasureTap < 280) return;
+  _lastMeasureTap = now;
+
+  try { e.preventDefault(); e.stopPropagation(); } catch (err) {}
   const src = (e.changedTouches && e.changedTouches[0]) || (e.touches && e.touches[0]) || e;
   if (!src || src.clientX == null) return;
   const pt = contentPointFromEvent(src);
-  if (!pt) return;
+  if (!pt) { status('Tap non rilevato'); return; }
 
   if (!measurePending) {
     measurePending = { x: pt.x, y: pt.y };
-    measureEdit = null;
-    status('1° punto — tocca il 2°');
+    status('1° punto OK — tocca il 2°');
     redrawMeasures();
     updateMeasureInfo();
     return;
@@ -1025,15 +1081,16 @@ function onMeasurePointer(e) {
   updateMeasureInfo();
 }
 function onMeasureStart(e) { onMeasurePointer(e); }
-function onMeasureMove(e) { /* no drag in simple mode */ }
-function onMeasureEnd(e) { /* placement on start */ }
+function onMeasureMove(e) {}
+function onMeasureEnd(e) {}
 function onMeasureTap(e) { onMeasurePointer(e); }
-function confirmMeasurePoint() { /* unused in simple mode */ }
+function confirmMeasurePoint() {}
 function cancelMeasurePoint() {
   measurePending = null;
   measureEdit = null;
   redrawMeasures();
   updateMeasureInfo();
+  status('Punto annullato');
 }
 
 
@@ -1070,48 +1127,51 @@ async function renderPdfPage() {
       (document.getElementById('docZoomWrap') && document.getElementById('docZoomWrap').clientWidth) || 0,
       window.innerWidth || 320
     );
-    // High quality: internal pixels = CSS size × quality factor
-    const cssWidth = Math.max(containerW, 320);
-    const cssHeight = Math.floor(cssWidth * (unscaled.height / unscaled.width));
-    // 6× is sharp up to ~6× zoom; higher risks iOS killing the tab
-    let mul = 6;
-    let fitScale = (cssWidth / unscaled.width) * mul;
+    // Render FROM THE VECTOR PDF at current zoom → always sharp (no bitmap upscale)
+    const baseW = Math.max(containerW, 320);
+    const z = Math.max(0.5, Math.min(25, Number(docZoom) || 1));
+    const dpr = Math.min(3, window.devicePixelRatio || 2);
+    // CSS display size grows with zoom; pixels = CSS × dpr for retina
+    const cssW = Math.floor(baseW * z);
+    const cssH = Math.floor(baseW * z * (unscaled.height / unscaled.width));
+    let fitScale = (cssW / unscaled.width) * dpr;
     let cw = Math.floor(unscaled.width * fitScale);
     let ch = Math.floor(unscaled.height * fitScale);
-    const maxPix = 20e6; // safer for iPhone
+    const maxPix = 28e6;
     if (cw * ch > maxPix) {
       const f = Math.sqrt(maxPix / (cw * ch));
       fitScale *= f;
       cw = Math.floor(unscaled.width * fitScale);
       ch = Math.floor(unscaled.height * fitScale);
-      mul = fitScale / (cssWidth / unscaled.width);
     }
     const fitVp = page.getViewport({ scale: fitScale });
     const ctx = canvas.getContext('2d', { alpha: false });
     canvas.width = cw;
     canvas.height = ch;
+    // Layout size = zoomed size; NO css transform scale on canvas (prevents blur)
     canvas.style.display = 'block';
-    canvas.style.width = cssWidth + 'px';
-    canvas.style.height = cssHeight + 'px';
+    canvas.style.width = cssW + 'px';
+    canvas.style.height = cssH + 'px';
     canvas.style.maxWidth = 'none';
     canvas.style.background = '#fff';
     if (img) img.style.display = 'none';
     if (empty) empty.style.display = 'none';
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
+    // Disable CSS transform zoom on wrap while PDF is shown
+    const wrap = document.getElementById('docZoomWrap');
+    if (wrap) {
+      wrap.style.transform = 'none';
+      wrap.style.width = '100%';
+    }
+    ctx.imageSmoothingEnabled = false;
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    status('Rendering… ' + cw + '×' + ch + ' px');
+    status('Rendering nitido… ' + cw + '×' + ch);
     await page.render({ canvasContext: ctx, viewport: fitVp }).promise;
     status('PDF pronto · ' + cw + '×' + ch);
     requestAnimationFrame(() => {
       applyDocZoom();
       resizeMeasureSvg();
-      const hit = document.getElementById('docMeasureHit');
-      if (hit && canvas) {
-        hit.style.width = canvas.offsetWidth + 'px';
-        hit.style.height = canvas.offsetHeight + 'px';
-      }
+      syncMeasureHitLayer();
       redrawMeasures();
     });
   } catch (e) {
@@ -1331,12 +1391,7 @@ function initDocViewerUI() {
     // allow re-selecting same file
     try { ev.target.value = ''; } catch (e) {}
   });
-  document.getElementById('btnCalibrate')?.addEventListener('click', () => setMeasureMode('calibrate'));
-  document.getElementById('btnMeasure')?.addEventListener('click', () => {
-    if (!measureScale) { status('Prima imposta la scala'); setMeasureMode('calibrate'); return; }
-    setMeasureMode('measure');
-  });
-  document.getElementById('btnMeasurePan')?.addEventListener('click', () => setMeasureMode('pan'));
+  // mode buttons bound above
   document.getElementById('btnMeasureUndo')?.addEventListener('click', () => {
     if (!measureItems.length) return;
     measureItems.pop();
@@ -1351,20 +1406,32 @@ function initDocViewerUI() {
     saveMeasures();
     redrawMeasures();
   });
-  const hit = document.getElementById('docMeasureHit');
-  if (hit) {
-    hit.style.pointerEvents = 'auto';
-    // single event path to avoid double taps
-    hit.addEventListener('pointerup', onMeasurePointer, { capture: true });
-    hit.addEventListener('touchend', onMeasurePointer, { passive: false, capture: true });
-  }
-  document.getElementById('btnPointOk')?.addEventListener('click', e => {
-    e.preventDefault(); e.stopPropagation();
-    confirmMeasurePoint();
-  });
+  const bindMeasureTarget = (el) => {
+    if (!el || el.__measureBound) return;
+    el.__measureBound = true;
+    el.addEventListener('click', onMeasurePointer, true);
+    el.addEventListener('touchend', onMeasurePointer, { passive: false, capture: true });
+  };
+  bindMeasureTarget(document.getElementById('docMeasureHit'));
+  bindMeasureTarget(document.getElementById('docPdfCanvas'));
+  bindMeasureTarget(document.getElementById('docZoomWrap'));
   document.getElementById('btnPointCancel')?.addEventListener('click', e => {
     e.preventDefault(); e.stopPropagation();
     cancelMeasurePoint();
+  });
+  // robust mode buttons
+  document.getElementById('btnCalibrate')?.addEventListener('click', e => {
+    e.preventDefault(); e.stopPropagation();
+    setMeasureMode('calibrate');
+  });
+  document.getElementById('btnMeasure')?.addEventListener('click', e => {
+    e.preventDefault(); e.stopPropagation();
+    if (!measureScale) { status('Prima imposta la scala'); setMeasureMode('calibrate'); return; }
+    setMeasureMode('measure');
+  });
+  document.getElementById('btnMeasurePan')?.addEventListener('click', e => {
+    e.preventDefault(); e.stopPropagation();
+    setMeasureMode('pan');
   });
   const scroll = document.getElementById('docScroll');
   if (scroll) {

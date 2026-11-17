@@ -1,6 +1,6 @@
-const CACHE_NAME = 'csr-grotte-v110';
-const TILE_CACHE = 'csr-tiles-v110';
-const DOC_CACHE = 'csr-docs-v110';
+const CACHE_NAME = 'csr-grotte-v112';
+const TILE_CACHE = 'csr-tiles-v112';
+const DOC_CACHE = 'csr-docs-v112';
 const APP_ASSETS = [
   './',
   './index.html',
