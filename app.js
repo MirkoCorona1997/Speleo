@@ -725,11 +725,25 @@ async function updateDocReadyLabels(codice) {
   }
   return ready;
 }
-function applyDocZoom() {
+function applyDocZoom(focal) {
+  // focal: {clientX, clientY} optional — zoom centered on that screen point
   const wrap = document.getElementById('docZoomWrap');
   const scroll = document.getElementById('docScroll');
   if (!wrap) return;
+  const prev = Math.max(0.5, Math.min(20, Number(docZoom) || 1));
+  // docZoom already set by caller; clamp
   docZoom = Math.max(0.5, Math.min(20, Number(docZoom) || 1));
+
+  let contentX = null, contentY = null, ox = 0, oy = 0;
+  if (scroll && focal && focal.clientX != null) {
+    const rect = scroll.getBoundingClientRect();
+    ox = focal.clientX - rect.left;
+    oy = focal.clientY - rect.top;
+    // content coords under focal point before zoom change
+    contentX = (scroll.scrollLeft + ox) / prev;
+    contentY = (scroll.scrollTop + oy) / prev;
+  }
+
   wrap.style.transformOrigin = '0 0';
   if (docZoom === 1) {
     wrap.style.transform = 'none';
@@ -741,6 +755,11 @@ function applyDocZoom() {
   if (scroll) {
     scroll.style.overflow = 'auto';
     scroll.style.webkitOverflowScrolling = 'touch';
+    if (contentX != null) {
+      // keep same content point under finger
+      scroll.scrollLeft = contentX * docZoom - ox;
+      scroll.scrollTop = contentY * docZoom - oy;
+    }
   }
   resizeMeasureSvg();
   redrawMeasures();
@@ -824,7 +843,7 @@ function redrawMeasures() {
   const svg = document.getElementById('docMeasureSvg');
   if (!svg) return;
   while (svg.firstChild) svg.removeChild(svg.firstChild);
-  const arm = 3.2; // small X cursor
+  const arm = 2; // smaller X cursor
   function drawX(x, y, color) {
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     [[-arm, -arm, arm, arm], [-arm, arm, arm, -arm]].forEach(([x1,y1,x2,y2]) => {
@@ -1264,8 +1283,22 @@ window.appCloseDoc = closeDocViewer;
 
 function initDocViewerUI() {
   document.getElementById('docClose')?.addEventListener('click', closeDocViewer);
-  document.getElementById('docZoomIn')?.addEventListener('click', () => { docZoom = Math.min(20, docZoom * 1.35); applyDocZoom(); status('Zoom ' + docZoom.toFixed(1) + '×'); });
-  document.getElementById('docZoomOut')?.addEventListener('click', () => { docZoom = Math.max(0.5, docZoom / 1.35); applyDocZoom(); status('Zoom ' + docZoom.toFixed(1) + '×'); });
+  document.getElementById('docZoomIn')?.addEventListener('click', () => {
+    const sc = document.getElementById('docScroll');
+    const r = sc ? sc.getBoundingClientRect() : null;
+    const focal = r ? { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 } : null;
+    docZoom = Math.min(20, docZoom * 1.35);
+    applyDocZoom(focal);
+    status('Zoom ' + docZoom.toFixed(1) + '×');
+  });
+  document.getElementById('docZoomOut')?.addEventListener('click', () => {
+    const sc = document.getElementById('docScroll');
+    const r = sc ? sc.getBoundingClientRect() : null;
+    const focal = r ? { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 } : null;
+    docZoom = Math.max(0.5, docZoom / 1.35);
+    applyDocZoom(focal);
+    status('Zoom ' + docZoom.toFixed(1) + '×');
+  });
   document.getElementById('docZoomReset')?.addEventListener('click', () => { docZoom = 1; applyDocZoom(); });
   document.getElementById('btnOpenPdf')?.addEventListener('click', () => {
     if (docCurrentUrl) window.open(docCurrentUrl, '_blank', 'noopener,noreferrer');
@@ -1360,19 +1393,26 @@ function initDocViewerUI() {
       if (e.touches.length === 2) {
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
-        docPinch = { dist: Math.hypot(dx, dy), zoom: docZoom };
+        const mx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        const my = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        docPinch = { dist: Math.hypot(dx, dy) || 1, zoom: docZoom, mx, my };
       }
     }, { passive: true });
     scroll.addEventListener('touchmove', e => {
       if (e.touches.length === 2 && docPinch) {
+        e.preventDefault();
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
-        const dist = Math.hypot(dx, dy);
+        const dist = Math.hypot(dx, dy) || 1;
+        const mx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        const my = (e.touches[0].clientY + e.touches[1].clientY) / 2;
         docZoom = docPinch.zoom * (dist / docPinch.dist);
-        applyDocZoom();
+        applyDocZoom({ clientX: mx, clientY: my });
       }
+    }, { passive: false });
+    scroll.addEventListener('touchend', e => {
+      if (e.touches.length < 2) docPinch = null;
     }, { passive: true });
-    scroll.addEventListener('touchend', () => { docPinch = null; }, { passive: true });
   }
   window.addEventListener('resize', () => { resizeMeasureSvg(); redrawMeasures(); });
 }
