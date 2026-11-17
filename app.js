@@ -719,10 +719,21 @@ function applyDocZoom(focal) {
   const prevZ = Math.max(0.5, Math.min(25, Number(window.__prevDocZoom) || docZoom || 1));
   docZoom = Math.max(0.5, Math.min(25, Number(docZoom) || 1));
 
-  // PDF loaded: zoom = re-render from vector (always sharp)
+  // PDF loaded: zoom = re-render from vector (always sharp) — only if zoom changed
   const pdfMode = pdfDoc && canvas && canvas.style.display !== 'none' && canvas.width > 0;
   if (pdfMode) {
-    // keep relative scroll position
+    const lastZ = Number(window.__pdfRenderedZoom);
+    const zoomChanged = !isFinite(lastZ) || Math.abs(lastZ - docZoom) > 0.02;
+    wrap.style.transform = 'none';
+    wrap.style.width = '100%';
+    window.__prevDocZoom = docZoom;
+    if (!zoomChanged) {
+      // same zoom — just keep overlay in sync, do NOT re-render
+      resizeMeasureSvg();
+      if (typeof syncMeasureHitLayer === 'function') syncMeasureHitLayer();
+      redrawMeasures();
+      return;
+    }
     let relX = 0.5, relY = 0.5;
     if (scroll) {
       const maxX = Math.max(1, scroll.scrollWidth - scroll.clientWidth);
@@ -735,10 +746,6 @@ function applyDocZoom(focal) {
         relY = (scroll.scrollTop + (focal.clientY - rect.top)) / Math.max(1, scroll.scrollHeight);
       }
     }
-    wrap.style.transform = 'none';
-    wrap.style.width = '100%';
-    window.__prevDocZoom = docZoom;
-    // debounce re-render during pinch
     clearTimeout(pdfZoomTimer);
     pdfZoomTimer = setTimeout(async () => {
       try {
@@ -750,12 +757,13 @@ function applyDocZoom(focal) {
             scroll.scrollLeft = relX * maxX;
             scroll.scrollTop = relY * maxY;
             resizeMeasureSvg();
+            if (typeof syncMeasureHitLayer === 'function') syncMeasureHitLayer();
             redrawMeasures();
           });
         }
       } catch (e) { console.error(e); }
-    }, 120);
-    status('Zoom ' + docZoom.toFixed(1) + '× (render nitido…)');
+    }, 150);
+    status('Zoom ' + docZoom.toFixed(1) + '×');
     return;
   }
 
@@ -1168,10 +1176,10 @@ async function renderPdfPage() {
     status('Rendering nitido… ' + cw + '×' + ch);
     await page.render({ canvasContext: ctx, viewport: fitVp }).promise;
     status('PDF pronto · ' + cw + '×' + ch);
+    window.__pdfRenderedZoom = docZoom;
     requestAnimationFrame(() => {
-      applyDocZoom();
       resizeMeasureSvg();
-      syncMeasureHitLayer();
+      if (typeof syncMeasureHitLayer === 'function') syncMeasureHitLayer();
       redrawMeasures();
     });
   } catch (e) {
@@ -1303,7 +1311,11 @@ async function openMeasureWorkspace(pdfUrl, codice) {
   } else {
     status('Importa il PDF del rilievo');
   }
-  requestAnimationFrame(() => { applyDocZoom(); resizeMeasureSvg(); redrawMeasures(); });
+  requestAnimationFrame(() => {
+    resizeMeasureSvg();
+    if (typeof syncMeasureHitLayer === 'function') syncMeasureHitLayer();
+    redrawMeasures();
+  });
 }
 
 function closeDocViewer() {
