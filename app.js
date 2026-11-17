@@ -711,26 +711,24 @@ async function updateDocReadyLabels(codice) {
   return 0;
 }
 function applyDocZoom(focal) {
-  // focal: {clientX, clientY} optional — zoom centered on that screen point
   const wrap = document.getElementById('docZoomWrap');
   const scroll = document.getElementById('docScroll');
   if (!wrap) return;
-  const prev = Math.max(0.5, Math.min(20, Number(docZoom) || 1));
-  // docZoom already set by caller; clamp
-  docZoom = Math.max(0.5, Math.min(20, Number(docZoom) || 1));
+  const prevZ = Math.max(0.5, Math.min(25, Number(window.__prevDocZoom) || docZoom || 1));
+  docZoom = Math.max(0.5, Math.min(25, Number(docZoom) || 1));
 
   let contentX = null, contentY = null, ox = 0, oy = 0;
   if (scroll && focal && focal.clientX != null) {
     const rect = scroll.getBoundingClientRect();
     ox = focal.clientX - rect.left;
     oy = focal.clientY - rect.top;
-    // content coords under focal point before zoom change
-    contentX = (scroll.scrollLeft + ox) / prev;
-    contentY = (scroll.scrollTop + oy) / prev;
+    contentX = (scroll.scrollLeft + ox) / prevZ;
+    contentY = (scroll.scrollTop + oy) / prevZ;
   }
 
   wrap.style.transformOrigin = '0 0';
-  if (docZoom === 1) {
+  wrap.style.willChange = 'transform';
+  if (Math.abs(docZoom - 1) < 0.001) {
     wrap.style.transform = 'none';
     wrap.style.width = '100%';
   } else {
@@ -741,11 +739,14 @@ function applyDocZoom(focal) {
     scroll.style.overflow = 'auto';
     scroll.style.webkitOverflowScrolling = 'touch';
     if (contentX != null) {
-      // keep same content point under finger
-      scroll.scrollLeft = contentX * docZoom - ox;
-      scroll.scrollTop = contentY * docZoom - oy;
+      // keep focal content point under fingers
+      const nx = contentX * docZoom - ox;
+      const ny = contentY * docZoom - oy;
+      scroll.scrollLeft = nx;
+      scroll.scrollTop = ny;
     }
   }
+  window.__prevDocZoom = docZoom;
   resizeMeasureSvg();
   redrawMeasures();
 }
@@ -828,7 +829,7 @@ function redrawMeasures() {
   const svg = document.getElementById('docMeasureSvg');
   if (!svg) return;
   while (svg.firstChild) svg.removeChild(svg.firstChild);
-  const arm = 2; // smaller X cursor
+  const arm = Math.max(1.2, 3.5 / Math.max(docZoom, 1)); // ~3.5px on screen at any zoom
   function drawX(x, y, color) {
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     [[-arm, -arm, arm, arm], [-arm, arm, arm, -arm]].forEach(([x1,y1,x2,y2]) => {
@@ -836,7 +837,7 @@ function redrawMeasures() {
       l.setAttribute('x1', x + x1); l.setAttribute('y1', y + y1);
       l.setAttribute('x2', x + x2); l.setAttribute('y2', y + y2);
       l.setAttribute('stroke', color);
-      l.setAttribute('stroke-width', '1.25');
+      l.setAttribute('stroke-width', String(Math.max(0.8, 1.1 / Math.max(docZoom, 1))));
       l.setAttribute('stroke-linecap', 'round');
       g.appendChild(l);
     });
@@ -1272,7 +1273,7 @@ function initDocViewerUI() {
     const sc = document.getElementById('docScroll');
     const r = sc ? sc.getBoundingClientRect() : null;
     const focal = r ? { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 } : null;
-    docZoom = Math.min(20, docZoom * 1.35);
+    docZoom = Math.min(25, docZoom * 1.4);
     applyDocZoom(focal);
     status('Zoom ' + docZoom.toFixed(1) + '×');
   });
@@ -1280,7 +1281,7 @@ function initDocViewerUI() {
     const sc = document.getElementById('docScroll');
     const r = sc ? sc.getBoundingClientRect() : null;
     const focal = r ? { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 } : null;
-    docZoom = Math.max(0.5, docZoom / 1.35);
+    docZoom = Math.max(0.5, docZoom / 1.4);
     applyDocZoom(focal);
     status('Zoom ' + docZoom.toFixed(1) + '×');
   });
@@ -1380,6 +1381,7 @@ function initDocViewerUI() {
         const dy = e.touches[0].clientY - e.touches[1].clientY;
         const mx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
         const my = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        window.__prevDocZoom = docZoom;
         docPinch = { dist: Math.hypot(dx, dy) || 1, zoom: docZoom, mx, my };
       }
     }, { passive: true });
@@ -1391,8 +1393,12 @@ function initDocViewerUI() {
         const dist = Math.hypot(dx, dy) || 1;
         const mx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
         const my = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-        docZoom = docPinch.zoom * (dist / docPinch.dist);
+        window.__prevDocZoom = docZoom;
+        docZoom = Math.max(0.5, Math.min(25, docPinch.zoom * (dist / docPinch.dist)));
         applyDocZoom({ clientX: mx, clientY: my });
+        // rebase so continuous pinch stays smooth
+        docPinch.dist = dist;
+        docPinch.zoom = docZoom;
       }
     }, { passive: false });
     scroll.addEventListener('touchend', e => {

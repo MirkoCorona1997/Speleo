@@ -15,7 +15,7 @@
 :root{
   --bg:#1a2332;--panel:#243044;--panel2:#2c3a50;--line:#3a4a63;
   --text:#eef2f7;--muted:#9aabbc;--accent:#3dcfb0;--accent2:#2a9f88;
-  --danger:#e85d5d;--safe-b:env(safe-area-inset-bottom,0px);--safe-t:env(safe-area-inset-top,0px);--tab:50px;
+  --danger:#e85d5d;--safe-b:env(safe-area-inset-bottom,0px);--safe-t:env(safe-area-inset-top,0px);--tab:48px;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html{
@@ -313,7 +313,7 @@ html,body{
 </style>
 </head>
 <body>
-<div class="ver">v10.6</div>
+<div class="ver">v10.7</div>
 <div class="offline" id="offlineBadge">OFFLINE</div>
 <div class="errbox" id="errbox"></div>
 <div id="docViewer" style="display:none;position:fixed;inset:0;z-index:5000;background:#0b1220;flex-direction:column;height:100%;height:100dvh">
@@ -511,6 +511,7 @@ html,body{
     <button class="bb" id="poiCancel">Annulla</button>
   </div>
 </div>
+<div id="bottomSafeFill" style="position:fixed;left:0;right:0;bottom:0;height:env(safe-area-inset-bottom,0px);background:var(--panel);z-index:1999;pointer-events:none"></div>
 <nav class="tabs">
   <button class="tab on" data-view="map"><span class="i">🗺️</span>Mappa</button>
   <button class="tab" data-view="tracce"><span class="i">📍</span>Tracce</button>
