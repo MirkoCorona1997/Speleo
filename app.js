@@ -1072,6 +1072,11 @@ function onMeasureTap(e) {
 }
 
 
+let pdfDoc = null;
+let pdfPageNum = 1;
+let pdfRenderScale = 1.5;
+let pdfRendering = false;
+
 function setupPdfJs() {
   const lib = window.pdfjsLib || window['pdfjs-dist/build/pdf'];
   if (!lib) return null;
