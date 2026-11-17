@@ -865,6 +865,25 @@ function resizeMeasureSvg() {
 function pxDist(x1, y1, x2, y2) {
   return Math.hypot(x2 - x1, y2 - y1);
 }
+function canvasLayoutSize() {
+  const c = document.getElementById('docPdfCanvas');
+  const w = (c && c.offsetWidth) || 1;
+  const h = (c && c.offsetHeight) || 1;
+  return { w, h };
+}
+/** Store coords relative to canvas WIDTH (zoom-independent) */
+function toStored(pt) {
+  const { w } = canvasLayoutSize();
+  return { x: pt.x / w, y: pt.y / w };
+}
+function fromStored(st) {
+  const { w } = canvasLayoutSize();
+  return { x: st.x * w, y: st.y * w };
+}
+function storedDist(a, b) {
+  return Math.hypot(b.x - a.x, b.y - a.y);
+}
+
 function formatMeters(m) {
   if (m == null || !isFinite(m)) return '—';
   if (m < 1) return (m * 100).toFixed(1) + ' cm';
@@ -892,38 +911,50 @@ function redrawMeasures() {
   const all = measureItems.slice();
   if (measureDraft) all.push({ ...measureDraft, draft: true });
   all.forEach(it => {
-    const col = it.draft ? '#f5b942' : (it.calib ? '#3b9eff' : '#ff5a5a');
+    // norm:true → stored as fraction of width; legacy pixel coords if missing
+    let p1, p2;
+    if (it.norm || (it.x1 <= 2 && it.y1 <= 2 && it.x2 <= 2 && it.y2 <= 2)) {
+      p1 = fromStored({ x: it.x1, y: it.y1 });
+      p2 = fromStored({ x: it.x2, y: it.y2 });
+    } else {
+      p1 = { x: it.x1, y: it.y1 };
+      p2 = { x: it.x2, y: it.y2 };
+    }
+    // scale ref blue dashed; measures yellow
+    const col = it.draft ? '#f5b942' : (it.calib ? '#3b9eff' : '#f5b942');
     const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    line.setAttribute('x1', it.x1); line.setAttribute('y1', it.y1);
-    line.setAttribute('x2', it.x2); line.setAttribute('y2', it.y2);
+    line.setAttribute('x1', p1.x); line.setAttribute('y1', p1.y);
+    line.setAttribute('x2', p2.x); line.setAttribute('y2', p2.y);
     line.setAttribute('stroke', col);
-    line.setAttribute('stroke-width', '1.2');
+    line.setAttribute('stroke-width', it.calib ? '1.5' : '2');
     line.setAttribute('stroke-linecap', 'round');
-    if (it.calib) line.setAttribute('stroke-dasharray', '4 3');
+    if (it.calib) line.setAttribute('stroke-dasharray', '6 4');
     svg.appendChild(line);
-    drawX(it.x1, it.y1, col);
-    drawX(it.x2, it.y2, col);
+    drawX(p1.x, p1.y, col);
+    drawX(p2.x, p2.y, col);
     if (it.meters != null || it.draft) {
-      const mx = (it.x1 + it.x2) / 2, my = (it.y1 + it.y2) / 2;
+      const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
       const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      label.setAttribute('x', mx); label.setAttribute('y', my - 6);
+      label.setAttribute('x', mx); label.setAttribute('y', my - 8);
       label.setAttribute('text-anchor', 'middle');
-      label.setAttribute('fill', '#fff');
-      label.setAttribute('font-size', '11');
-      label.setAttribute('font-weight', '700');
+      label.setAttribute('fill', it.calib ? '#3b9eff' : '#f5b942');
+      label.setAttribute('font-size', '13');
+      label.setAttribute('font-weight', '800');
       label.setAttribute('paint-order', 'stroke');
       label.setAttribute('stroke', '#000');
-      label.setAttribute('stroke-width', '2.5');
+      label.setAttribute('stroke-width', '3');
       let text = '';
-      if (it.calib) text = 'Scala';
+      if (it.calib) text = 'Scala ' + formatMeters(it.meters);
       else if (it.meters != null) text = formatMeters(it.meters);
-      else if (measureScale) text = formatMeters(pxDist(it.x1, it.y1, it.x2, it.y2) * measureScale);
-      else text = Math.round(pxDist(it.x1, it.y1, it.x2, it.y2)) + ' px';
+      else text = '';
       label.textContent = text;
       svg.appendChild(label);
     }
   });
-  if (measurePending) drawX(measurePending.x, measurePending.y, '#3dcfb0');
+  if (measurePending) {
+    // pending is in screen pixels
+    drawX(measurePending.x, measurePending.y, '#3dcfb0');
+  }
   if (measureEdit) drawX(measureEdit.x, measureEdit.y, '#f5b942');
   renderMeasureList();
   updateMeasureInfo();
