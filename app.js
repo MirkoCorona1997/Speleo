@@ -1,3 +1,19 @@
+
+/* Fill real screen height on iOS (kills bottom gap) */
+(function __appHeightFix(){
+  const setH = () => {
+    const h = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+    document.documentElement.style.setProperty('--app-h', h + 'px');
+    document.body.style.height = h + 'px';
+    try { if (window.map) map.invalidateSize(false); } catch(e) {}
+  };
+  setH();
+  window.addEventListener('resize', setH);
+  if (window.visualViewport) {
+    visualViewport.addEventListener('resize', setH);
+    visualViewport.addEventListener('scroll', setH);
+  }
+})();
 const DB='csr-grotte-v5', STORE_FAV='preferiti', STORE_NAMES='nomi', STORE_GEO='geojson', STORE_RIL='rilievi';
 let map, layer, all=[], cur=null, db=null, navMarker=null;
 const caveMarkers = new Map(); // id_ost -> L.circleMarker
