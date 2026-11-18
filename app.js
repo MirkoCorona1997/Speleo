@@ -4,7 +4,14 @@
   const setH = () => {
     const h = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
     document.documentElement.style.setProperty('--app-h', h + 'px');
+    document.documentElement.style.setProperty('--safe-b', '0px');
     document.body.style.height = h + 'px';
+    document.body.style.minHeight = h + 'px';
+    const tabs = document.querySelector('.tabs');
+    if (tabs) {
+      tabs.style.bottom = '0px';
+      tabs.style.paddingBottom = '0px';
+    }
     try { if (window.map) map.invalidateSize(false); } catch(e) {}
   };
   setH();

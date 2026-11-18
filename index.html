@@ -15,7 +15,7 @@
 :root{
   --bg:#1a2332;--panel:#243044;--panel2:#2c3a50;--line:#3a4a63;
   --text:#eef2f7;--muted:#9aabbc;--accent:#3dcfb0;--accent2:#2a9f88;
-  --danger:#e85d5d;--safe-b:env(safe-area-inset-bottom,0px);--safe-t:env(safe-area-inset-top,0px);--tab:44px;
+  --danger:#e85d5d;--safe-b:0px;--safe-t:env(safe-area-inset-top,0px);--tab:50px;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html{
@@ -44,8 +44,9 @@ html,body{
 .view.active{display:block}
 #map{position:absolute;top:0;left:0;right:0;bottom:0;width:100%;height:100%;background:#1a2332;z-index:1}
 /* list views keep bottom padding so content not under tabs */
-#view-tracks,#view-pois,#view-fav,#view-explored{
-  padding-bottom:calc(var(--tab) + var(--safe-b) + 8px);
+#view-tracks,#view-pois,#view-fav,#view-explored,
+#view-tracce,#view-punti,#view-preferiti,#view-esplorate{
+  padding-bottom:calc(var(--tab) + 12px);
   overflow:auto;-webkit-overflow-scrolling:touch;
 }
 
@@ -149,25 +150,35 @@ html,body{
 
 .tabs{
   position:fixed;left:0;right:0;bottom:0;z-index:2000;
-  height:calc(var(--tab) + var(--safe-b));
-  min-height:calc(var(--tab) + var(--safe-b));
+  height:var(--tab);
+  min-height:var(--tab);
   padding:0;
-  padding-bottom:var(--safe-b);
   margin:0;
   background:#243044;
   border-top:1px solid var(--line);
   display:flex;
-  align-items:flex-end;
+  align-items:center;
   box-sizing:border-box;
+  /* no empty safe-area strip under the icons */
 }
 .tab{
   flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
   gap:1px;background:none;border:none;color:var(--muted);
   font-size:9px;font-weight:700;cursor:pointer;
-  height:var(--tab);padding:0;margin:0;min-width:0;
+  height:100%;padding:0;margin:0;min-width:0;
 }
 .tab.on{color:var(--accent)}
 .tab .i{font-size:18px;line-height:1;margin:0}
+/* paint any leftover pixels under the bar with the same color */
+.tabs::after{
+  content:"";
+  position:fixed;
+  left:0;right:0;bottom:0;
+  height:env(safe-area-inset-bottom, 0px);
+  background:#243044;
+  z-index:1999;
+  pointer-events:none;
+}
 
 #view-preferiti, #view-esplorate{background:var(--bg);overflow-y:auto;-webkit-overflow-scrolling:touch;padding:max(16px,var(--safe-t)) 14px 20px;z-index:2}
 #view-preferiti h1, #view-esplorate h1{font-size:24px;font-weight:800;margin-bottom:2px}
@@ -316,7 +327,7 @@ html,body{
 </style>
 </head>
 <body>
-<div class="ver">v11.9</div>
+<div class="ver">v12.0</div>
 <div class="offline" id="offlineBadge">OFFLINE</div>
 <div class="errbox" id="errbox"></div>
 <div id="docViewer" style="display:none;position:fixed;inset:0;z-index:5000;background:#0b1220;flex-direction:column;height:100%;height:100dvh;overflow:hidden">
