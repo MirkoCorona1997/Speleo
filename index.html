@@ -313,7 +313,7 @@ html,body{
 </style>
 </head>
 <body>
-<div class="ver">v11.7</div>
+<div class="ver">v11.8</div>
 <div class="offline" id="offlineBadge">OFFLINE</div>
 <div class="errbox" id="errbox"></div>
 <div id="docViewer" style="display:none;position:fixed;inset:0;z-index:5000;background:#0b1220;flex-direction:column;height:100%;height:100dvh;overflow:hidden">
@@ -351,7 +351,13 @@ html,body{
       <div id="docMeasureHit" style="position:absolute;left:0;top:0;width:100%;height:100%;z-index:5;display:none;touch-action:none;pointer-events:auto;background:transparent"></div>
     </div>
   </div>
-  <div id="docMeasureList" style="display:none;position:absolute;left:0;right:0;bottom:0;max-height:28vh;overflow:auto;background:rgba(18,24,38,0.96);border-top:1px solid var(--line);padding:6px 10px;padding-bottom:calc(6px + var(--safe-b));z-index:30"></div>
+  <div id="docMeasureSheet" style="display:none;position:absolute;left:0;right:0;bottom:0;z-index:30;background:rgba(18,24,38,0.97);border-top:1px solid var(--line);border-radius:14px 14px 0 0;padding-bottom:var(--safe-b);transition:transform .22s ease;transform:translateY(calc(100% - 36px))">
+    <div id="docMeasureSheetHandle" style="height:36px;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;user-select:none;-webkit-user-select:none">
+      <div style="width:40px;height:4px;border-radius:2px;background:#5a6a82"></div>
+      <span id="docMeasureSheetLabel" style="font-size:11px;font-weight:700;color:#9aa4b8">Misure</span>
+    </div>
+    <div id="docMeasureList" style="max-height:32vh;overflow:auto;padding:0 12px 8px"></div>
+  </div>
   <input type="file" id="docImgInput" accept="application/pdf,.pdf,image/*,*/*" style="position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:0.01;z-index:1"/>
 </div>
 

@@ -965,15 +965,33 @@ function redrawMeasures() {
   if (okBtn) okBtn.style.display = measureEdit ? 'inline-flex' : 'none';
   if (cancelBtn) cancelBtn.style.display = measureEdit ? 'inline-flex' : 'none';
 }
+function setMeasureSheetOpen(open) {
+  const sheet = document.getElementById('docMeasureSheet');
+  if (!sheet) return;
+  window.__measureSheetOpen = !!open;
+  if (open) {
+    sheet.style.transform = 'translateY(0)';
+  } else {
+    // leave only the handle visible
+    sheet.style.transform = 'translateY(calc(100% - 36px))';
+  }
+}
 function renderMeasureList() {
   const el = document.getElementById('docMeasureList');
-  if (!el) return;
+  const sheet = document.getElementById('docMeasureSheet');
+  const label = document.getElementById('docMeasureSheetLabel');
+  if (!el || !sheet) return;
   if (!docIsRilievo || !measureItems.length) {
-    el.style.display = 'none';
+    sheet.style.display = 'none';
     el.innerHTML = '';
     return;
   }
-  el.style.display = 'block';
+  sheet.style.display = 'block';
+  const n = measureItems.length;
+  if (label) label.textContent = n + (n === 1 ? ' misura' : ' misure');
+  // keep collapsed by default unless user opened it
+  if (window.__measureSheetOpen == null) window.__measureSheetOpen = false;
+  setMeasureSheetOpen(window.__measureSheetOpen);
 
   el.innerHTML = measureItems.map(it => {
     const txt = it.calib
@@ -985,10 +1003,10 @@ function renderMeasureList() {
     </div>`;
   }).join('');
   el.querySelectorAll('button[data-mid]').forEach(b => {
-    b.onclick = () => {
+    b.onclick = (ev) => {
+      ev.stopPropagation();
       const id = b.dataset.mid;
       measureItems = measureItems.filter(x => String(x.id) !== String(id));
-      // if deleted last calib, keep scale unless no calib left
       saveMeasures();
       redrawMeasures();
     };
@@ -1370,8 +1388,9 @@ async function openMeasureWorkspace(pdfUrl, codice) {
   viewer.style.flexDirection = 'column';
   const bar = document.getElementById('docMeasureBar');
   if (bar) bar.style.display = 'flex';
-  const list = document.getElementById('docMeasureList');
-  if (list) list.style.display = 'none';
+  const sheet = document.getElementById('docMeasureSheet');
+  if (sheet) sheet.style.display = 'none';
+  window.__measureSheetOpen = false;
 
   if (docCurrentCodice) {
     const saved = loadMeasures(docCurrentCodice);
@@ -1440,6 +1459,36 @@ window.appCloseDoc = closeDocViewer;
 
 function initDocViewerUI() {
   document.getElementById('docClose')?.addEventListener('click', closeDocViewer);
+  // Measure list sheet: tap handle to open/close
+  (function initMeasureSheet() {
+    const handle = document.getElementById('docMeasureSheetHandle');
+    const sheet = document.getElementById('docMeasureSheet');
+    if (!handle || !sheet) return;
+    let startY = 0, startOpen = false;
+    const onTap = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setMeasureSheetOpen(!window.__measureSheetOpen);
+    };
+    handle.addEventListener('click', onTap);
+    handle.addEventListener('touchstart', (e) => {
+      if (!e.touches[0]) return;
+      startY = e.touches[0].clientY;
+      startOpen = !!window.__measureSheetOpen;
+    }, { passive: true });
+    handle.addEventListener('touchend', (e) => {
+      const t = e.changedTouches && e.changedTouches[0];
+      if (!t) return;
+      const dy = t.clientY - startY;
+      if (Math.abs(dy) < 8) {
+        setMeasureSheetOpen(!startOpen);
+      } else if (dy > 20) {
+        setMeasureSheetOpen(false); // swipe down = close
+      } else if (dy < -20) {
+        setMeasureSheetOpen(true); // swipe up = open
+      }
+    }, { passive: true });
+  })();
   document.getElementById('docZoomIn')?.addEventListener('click', () => {
     const sc = document.getElementById('docScroll');
     const r = sc ? sc.getBoundingClientRect() : null;
