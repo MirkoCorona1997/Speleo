@@ -15,7 +15,7 @@
 :root{
   --bg:#1a2332;--panel:#243044;--panel2:#2c3a50;--line:#3a4a63;
   --text:#eef2f7;--muted:#9aabbc;--accent:#3dcfb0;--accent2:#2a9f88;
-  --danger:#e85d5d;--safe-b:env(safe-area-inset-bottom,0px);--safe-t:env(safe-area-inset-top,0px);--tab:52px;
+  --danger:#e85d5d;--safe-b:0px;--safe-t:env(safe-area-inset-top,0px);--tab:56px;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html{
@@ -90,7 +90,7 @@ html,body{
 }
 
 .card{
-  position:absolute;left:10px;right:10px;bottom:calc(8px + var(--tab) + var(--safe-b));z-index:3000;
+  position:absolute;left:10px;right:10px;bottom:64px;z-index:3000;
   background:var(--panel);border-radius:16px;border:1px solid var(--line);
   box-shadow:0 8px 40px rgba(0,0,0,.5);
   transform:translateY(120%);opacity:0;transition:transform .25s ease,opacity .2s ease;
@@ -115,7 +115,7 @@ html,body{
 .bc{grid-column:1/-1;background:transparent;color:var(--muted);font-size:12px!important;height:36px!important}
 
 .nav-pin-info{
-  position:absolute;left:10px;right:10px;bottom:calc(8px + var(--tab) + var(--safe-b));z-index:1100;
+  position:absolute;left:10px;right:10px;bottom:64px;z-index:1100;
   background:var(--panel);border-radius:16px;border:1px solid var(--line);
   padding:14px 16px;display:none;box-shadow:0 8px 40px rgba(0,0,0,.5);
 }
@@ -152,27 +152,27 @@ html,body{
 
 .tabs{
   position:fixed;left:0;right:0;bottom:0;z-index:2000;
-  /* content 52px + a little room for home indicator, not a big empty band */
-  height:calc(var(--tab) + min(var(--safe-b), 12px));
-  min-height:calc(var(--tab) + min(var(--safe-b), 12px));
+  height:56px;
+  max-height:56px;
   padding:0;
-  padding-bottom:min(var(--safe-b), 12px);
   margin:0;
   background:#243044;
-  border-top:1px solid var(--line);
+  border-top:1px solid #3a4a63;
   display:flex;
-  align-items:flex-end;
+  align-items:center;
+  justify-content:space-around;
   box-sizing:border-box;
+  overflow:hidden;
 }
 .tab{
   flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
-  gap:2px;background:none;border:none;color:#9aabbc;
+  gap:2px;background:transparent;border:none;color:#9aabbc;
   font-size:10px;font-weight:700;cursor:pointer;
-  height:var(--tab);padding:0 2px 2px;margin:0;min-width:0;
-  line-height:1.1;
+  height:56px;padding:0;margin:0;min-width:0;
+  line-height:1.15;
 }
 .tab.on{color:#3dcfb0}
-.tab .i{font-size:20px;line-height:1;margin:0;display:block}
+.tab .i{font-size:20px;line-height:1;margin:0;display:block;height:22px}
 
 #view-preferiti, #view-esplorate{background:var(--bg);overflow-y:auto;-webkit-overflow-scrolling:touch;padding:max(16px,var(--safe-t)) 14px 20px;z-index:2}
 #view-preferiti h1, #view-esplorate h1{font-size:24px;font-weight:800;margin-bottom:2px}
@@ -216,7 +216,7 @@ html,body{
 }
 .track-bar {
   position: fixed; left: 10px; right: 10px;
-  bottom: calc(12px + var(--tab));
+  bottom:68px;
   z-index: 2600; display: none; pointer-events: auto;
   background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
   padding: 10px 12px; box-shadow: 0 6px 24px rgba(0,0,0,.4);
@@ -257,7 +257,7 @@ html,body{
 }
 .tr-card .acts .del { color: var(--danger); }
 .fab-track {
-  position: absolute; right: 12px; bottom: calc(70px + var(--tab));
+  position: absolute; right: 12px; bottom:126px;
   z-index: 900; width: 52px; height: 52px; border-radius: 26px;
   background: var(--accent2); color: #fff; border: none; font-size: 22px;
   box-shadow: 0 4px 16px rgba(0,0,0,.4); cursor: pointer;
@@ -275,7 +275,7 @@ html,body{
 
 .tr-detail {
   display: none;
-  position: fixed; left: 0; right: 0; bottom: var(--tab); z-index: 2500;
+  position: fixed; left: 0; right: 0; bottom:56px; z-index: 2500;
   background: var(--panel); border-radius: 20px 20px 0 0;
   border-top: 1px solid var(--line);
   max-height: calc(78vh - var(--tab)); overflow-y: auto; -webkit-overflow-scrolling: touch;
@@ -321,7 +321,7 @@ html,body{
 </style>
 </head>
 <body>
-<div class="ver">v12.1</div>
+<div class="ver">v12.2</div>
 <div class="offline" id="offlineBadge">OFFLINE</div>
 <div class="errbox" id="errbox"></div>
 <div id="docViewer" style="display:none;position:fixed;inset:0;z-index:5000;background:#0b1220;flex-direction:column;height:100%;height:100dvh;overflow:hidden">
@@ -400,7 +400,7 @@ html,body{
     <button class="go" id="applyFilters">Applica</button>
   </div>
   <div class="chip" id="status">Caricamento…</div>
-  <button type="button" id="backupBanner" style="display:none;position:absolute;left:10px;right:10px;bottom:calc(12px + var(--tab));z-index:2400;background:#243044;color:#fff;border:1px solid var(--line);border-radius:14px;padding:12px;text-align:left;font-size:13px">Sono passati 7 giorni. Tocca per scaricare il backup e salvarlo in File.</button>
+  <button type="button" id="backupBanner" style="display:none;position:absolute;left:10px;right:10px;bottom:68px;z-index:2400;background:#243044;color:#fff;border:1px solid var(--line);border-radius:14px;padding:12px;text-align:left;font-size:13px">Sono passati 7 giorni. Tocca per scaricare il backup e salvarlo in File.</button>
   <div class="hint-bar">Tieni premuto per navigare</div>
   <div class="mode-chip" id="modeChip">Percorso: vicino al sentiero lo segue, lontano usa il tuo punto</div>
   <div class="track-bar" id="trackBar">
@@ -515,7 +515,7 @@ html,body{
   <div class="td-acts" id="tdActs"></div>
 </div>
 
-<div id="poiSheet" style="display:none;position:fixed;left:10px;right:10px;bottom:calc(16px + var(--tab) + var(--safe-b));z-index:3000;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px;box-shadow:0 8px 30px rgba(0,0,0,.5)">
+<div id="poiSheet" style="display:none;position:fixed;left:10px;right:10px;bottom:72px;z-index:3000;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px;box-shadow:0 8px 30px rgba(0,0,0,.5)">
   <p id="poiTitle">Salva punto</p>
   <input id="poiName" placeholder="Nome del punto" style="width:100%;height:40px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--text);padding:0 10px;margin-bottom:8px"/>
   <textarea id="poiDesc" placeholder="Descrizione (facoltativa)" style="width:100%;height:64px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--text);padding:8px 10px;margin-bottom:8px"></textarea>

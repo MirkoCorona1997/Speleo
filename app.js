@@ -1,19 +1,36 @@
 
 /* Fill real screen height on iOS (kills bottom gap) */
 (function __appHeightFix(){
-  const setH = () => {
-    const h = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
-    document.documentElement.style.setProperty('--app-h', h + 'px');
-    document.body.style.height = h + 'px';
-    document.body.style.minHeight = h + 'px';
+  const TAB_H = 56;
+  const pin = () => {
+    const vv = window.visualViewport;
+    const h = Math.round((vv && vv.height) ? vv.height : window.innerHeight);
+    const top = Math.round((vv && vv.offsetTop) ? vv.offsetTop : 0);
+    const root = document.documentElement;
+    root.style.setProperty('--tab', TAB_H + 'px');
+    root.style.setProperty('--safe-b', '0px');
+    root.style.setProperty('--app-h', h + 'px');
+    document.body.style.cssText = 'position:fixed;left:0;top:' + top + 'px;width:100%;height:' + h + 'px;margin:0;padding:0;overflow:hidden;background:#243044;';
+    const tabs = document.querySelector('.tabs');
+    if (tabs) {
+      tabs.style.cssText = 'position:fixed;left:0;right:0;bottom:0;height:' + TAB_H + 'px;max-height:' + TAB_H + 'px;padding:0;margin:0;background:#243044;border-top:1px solid #3a4a63;display:flex;align-items:center;z-index:2000;box-sizing:border-box;overflow:hidden;';
+    }
+    document.querySelectorAll('.tab').forEach(t => {
+      t.style.height = TAB_H + 'px';
+      t.style.padding = '0';
+    });
     try { if (window.map) map.invalidateSize(false); } catch(e) {}
   };
-  setH();
-  window.addEventListener('resize', setH);
+  pin();
+  window.addEventListener('resize', pin);
+  window.addEventListener('orientationchange', () => setTimeout(pin, 100));
   if (window.visualViewport) {
-    visualViewport.addEventListener('resize', setH);
-    visualViewport.addEventListener('scroll', setH);
+    visualViewport.addEventListener('resize', pin);
+    visualViewport.addEventListener('scroll', pin);
   }
+  document.addEventListener('DOMContentLoaded', pin);
+  setTimeout(pin, 50);
+  setTimeout(pin, 300);
 })();
 const DB='csr-grotte-v5', STORE_FAV='preferiti', STORE_NAMES='nomi', STORE_GEO='geojson', STORE_RIL='rilievi';
 let map, layer, all=[], cur=null, db=null, navMarker=null;
