@@ -913,10 +913,11 @@ function redrawMeasures() {
   all.forEach(it => {
     // norm:true → stored as fraction of width; legacy pixel coords if missing
     let p1, p2;
-    if (it.norm || (it.x1 <= 2 && it.y1 <= 2 && it.x2 <= 2 && it.y2 <= 2)) {
+    if (it.norm) {
       p1 = fromStored({ x: it.x1, y: it.y1 });
       p2 = fromStored({ x: it.x2, y: it.y2 });
     } else {
+      // legacy pixel coords: convert on the fly using current width (best effort)
       p1 = { x: it.x1, y: it.y1 };
       p2 = { x: it.x2, y: it.y2 };
     }
@@ -926,9 +927,10 @@ function redrawMeasures() {
     line.setAttribute('x1', p1.x); line.setAttribute('y1', p1.y);
     line.setAttribute('x2', p2.x); line.setAttribute('y2', p2.y);
     line.setAttribute('stroke', col);
-    line.setAttribute('stroke-width', it.calib ? '1.5' : '2');
+    line.setAttribute('stroke-width', it.calib ? '3' : '2.5');
     line.setAttribute('stroke-linecap', 'round');
-    if (it.calib) line.setAttribute('stroke-dasharray', '6 4');
+    if (it.calib) line.setAttribute('stroke-dasharray', '10 6');
+    line.setAttribute('opacity', '1');
     svg.appendChild(line);
     drawX(p1.x, p1.y, col);
     drawX(p2.x, p2.y, col);
@@ -1053,25 +1055,47 @@ function setMeasureMode(mode) {
 function contentPointFromEvent(e) {
   const canvas = document.getElementById('docPdfCanvas');
   const wrap = document.getElementById('docZoomWrap');
+  const scroll = document.getElementById('docScroll');
   const target = (canvas && canvas.style.display !== 'none' && canvas.offsetWidth) ? canvas : wrap;
   if (!target) return null;
+  // Use scroll container + scroll offsets so pan does not shift measure coords
+  if (scroll) {
+    const srect = scroll.getBoundingClientRect();
+    // position inside the scroll content
+    let x = (e.clientX - srect.left) + scroll.scrollLeft;
+    let y = (e.clientY - srect.top) + scroll.scrollTop;
+    // subtract target offset inside wrap/scroll content
+    x -= target.offsetLeft || 0;
+    y -= target.offsetTop || 0;
+    return { x, y };
+  }
   const rect = target.getBoundingClientRect();
-  // map screen → element local CSS pixels
-  const x = e.clientX - rect.left;
-  const y = e.clientY - rect.top;
-  return { x, y };
+  const scaleX = target.offsetWidth / Math.max(rect.width, 1);
+  const scaleY = target.offsetHeight / Math.max(rect.height, 1);
+  return {
+    x: (e.clientX - rect.left) * scaleX,
+    y: (e.clientY - rect.top) * scaleY
+  };
 }
 function finishSegment(x1, y1, x2, y2) {
-  const dist = pxDist(x1, y1, x2, y2);
-  if (dist < 2) { status('Punti troppo vicini, riprova'); return; }
+  // Always store as fraction of current canvas WIDTH (stable across zoom)
+  const s1 = toStored({ x: x1, y: y1 });
+  const s2 = toStored({ x: x2, y: y2 });
+  const distN = storedDist(s1, s2);
+  if (distN < 0.0015) { status('Punti troppo vicini, riprova'); return; }
   if (measureMode === 'calibrate') {
     const metersStr = prompt('Quanti metri nella realtà corrisponde questo segmento?', '1');
-    if (metersStr == null) { measurePending = null; redrawMeasures(); return; }
+    if (metersStr == null) { measurePending = null; measureEdit = null; redrawMeasures(); return; }
     const meters = parseFloat(String(metersStr).replace(',', '.'));
     if (!isFinite(meters) || meters <= 0) { status('Valore non valido'); return; }
-    measureScale = meters / dist;
+    measureScale = meters / distN; // meters per width-fraction
     measureItems = measureItems.filter(x => !x.calib);
-    measureItems.push({ id: 'c' + (measureIdSeq++), x1, y1, x2, y2, meters, calib: true, label: 'Scala ' + formatMeters(meters) });
+    measureItems.push({
+      id: 'c' + (measureIdSeq++),
+      x1: s1.x, y1: s1.y, x2: s2.x, y2: s2.y,
+      meters, calib: true, norm: true,
+      label: 'Scala ' + formatMeters(meters)
+    });
     saveMeasures();
     measurePending = null;
     measureEdit = null;
@@ -1079,8 +1103,13 @@ function finishSegment(x1, y1, x2, y2) {
     status('Scala impostata: ' + formatMeters(meters));
   } else if (measureMode === 'measure') {
     if (!measureScale) { status('Prima imposta la scala'); return; }
-    const meters = dist * measureScale;
-    measureItems.push({ id: 'm' + (measureIdSeq++), x1, y1, x2, y2, meters, label: formatMeters(meters) });
+    const meters = distN * measureScale;
+    measureItems.push({
+      id: 'm' + (measureIdSeq++),
+      x1: s1.x, y1: s1.y, x2: s2.x, y2: s2.y,
+      meters, norm: true,
+      label: formatMeters(meters)
+    });
     saveMeasures();
     measurePending = null;
     measureEdit = null;
@@ -1251,6 +1280,16 @@ async function renderPdfPage() {
     requestAnimationFrame(() => {
       resizeMeasureSvg();
       if (typeof syncMeasureHitLayer === 'function') syncMeasureHitLayer();
+      // force SVG to exact canvas pixel size
+      const svg = document.getElementById('docMeasureSvg');
+      if (svg && canvas) {
+        const w = canvas.offsetWidth, h = canvas.offsetHeight;
+        if (w && h) {
+          svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+          svg.style.width = w + 'px';
+          svg.style.height = h + 'px';
+        }
+      }
       redrawMeasures();
     });
   } catch (e) {
